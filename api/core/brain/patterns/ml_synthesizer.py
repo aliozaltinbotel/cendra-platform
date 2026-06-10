@@ -37,7 +37,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, cast, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -374,10 +374,13 @@ def build_default_classifier_factory() -> Callable[
             max_depth,
             min_samples_leaf,
         )
-        return DecisionTreeClassifier(
-            max_depth=max_depth,
-            min_samples_leaf=min_samples_leaf,
-            random_state=0,
+        return cast(
+            "TreeClassifierProtocol",
+            DecisionTreeClassifier(
+                max_depth=max_depth,
+                min_samples_leaf=min_samples_leaf,
+                random_state=0,
+            ),
         )
 
     return factory

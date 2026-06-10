@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, override, runtime_checkable
 
 __all__ = [
     "Blocker",
@@ -100,6 +100,7 @@ class Blocker:
     resolved_at: datetime | None = None
     resolved_by: str | None = None
 
+    @override
     def __repr__(self) -> str:
         status = "resolved" if self.is_resolved else "active"
         return (

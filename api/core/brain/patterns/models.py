@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any, Final, override
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -300,6 +300,7 @@ class DecisionAction:
     action_type: DecisionType
     params: dict[str, Any] = field(default_factory=dict)
 
+    @override
     def __repr__(self) -> str:
         return f"DecisionAction({self.action_type.value}, params={self.params})"
 
@@ -553,6 +554,7 @@ class DecisionCase:
     # sites do not break.
     origin: PatternOrigin = field(default_factory=PatternOrigin)
 
+    @override
     def __repr__(self) -> str:
         return (
             f"DecisionCase(id={self.case_id[:8]}…, "
@@ -703,6 +705,7 @@ class PatternRule:
     # endpoint that closes Ali's Turkish requirement #1.
     origin: PatternOrigin = field(default_factory=PatternOrigin)
 
+    @override
     def __repr__(self) -> str:
         return (
             f"PatternRule(id={self.pattern_id[:8]}…, "

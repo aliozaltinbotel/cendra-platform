@@ -613,10 +613,7 @@ def _categorical_candidates(
                 )
             )
         except Exception:
-            logger.exception(
-                "in_operator_candidates_failed",
-                field=key,
-            )
+            logger.exception("in_operator_candidates_failed field=%s", key)
     return candidates
 
 

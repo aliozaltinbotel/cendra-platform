@@ -42,7 +42,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, override, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -87,6 +87,7 @@ class ApprovalRequest(BaseModel):
     responded_at: str | None = Field(default=None)
     owner_response: str | None = Field(default=None)
 
+    @override
     def __repr__(self) -> str:
         return f"ApprovalRequest(id={self.request_id!r}, action={self.action_type!r}, status={self.status.value!r})"
 
@@ -283,6 +284,7 @@ class ConfidenceRouter:
             return ConfidenceTier.MEDIUM
         return ConfidenceTier.LOW
 
+    @override
     def __repr__(self) -> str:
         return f"ConfidenceRouter(high={self._high}, medium={self._medium}, never_auto={len(self._never_auto)} actions)"
 

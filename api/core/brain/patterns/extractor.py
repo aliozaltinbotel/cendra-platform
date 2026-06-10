@@ -22,7 +22,7 @@ import statistics
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, TypedDict
 
 from core.brain.patterns.condition_synthesizer import (
     _resolve_feature_keys,
@@ -1136,9 +1136,21 @@ def _build_rationale(
     return " — ".join(parts)
 
 
+class _SignalCounts(TypedDict):
+    """Fixed key set for the ConfidenceContext signal splat (typing aid)."""
+
+    pm_explicit_rule_count: int
+    pm_repeated_edit_count: int
+    pm_approval_count: int
+    guest_complaint_count: int
+    task_reopen_count: int
+    vendor_sla_breach_count: int
+    review_mention_count: int
+
+
 def _count_signal_weights(
     cases: Iterable[DecisionCase],
-) -> dict[str, int]:
+) -> _SignalCounts:
     """Count Proactive §5 signal occurrences across rule-supporting cases.
 
     Returns a dict keyed by the
@@ -1171,7 +1183,7 @@ def _count_signal_weights(
         so a caller that splats the dict gets the legacy formula
         when no signals are present.
     """
-    counts = {
+    counts: _SignalCounts = {
         "pm_explicit_rule_count": 0,
         "pm_repeated_edit_count": 0,
         "pm_approval_count": 0,
@@ -1310,7 +1322,7 @@ def _dominant_foundation_id(
 
 def _dominant_stage(
     cases: Iterable[DecisionCase],
-) -> BookingStage | None:
+) -> str | None:
     """Return the strict-majority booking stage among ``cases``.
 
     A stage is reported only when its count strictly exceeds every

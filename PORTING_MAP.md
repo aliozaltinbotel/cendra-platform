@@ -16,13 +16,13 @@ Source of truth for what moves where, in which batch, and its status. Source pat
 
 | Source | Target | Notes | Status |
 |---|---|---|---|
-| DecisionCase store (`bootstrap/decision_case.py` + store impls) | `api/models/brain_decision.py` + `api/core/brain/patterns/case_store.py` | Tenant-scoped; SQLAlchemy rewrite | TODO |
-| `patterns/postgres_rule_store.py` + `temporal_resolver.py` | `api/models/brain_rules.py` + `api/core/brain/patterns/` | Bi-temporal fields verbatim (`valid_from…last_seen_at`) | TODO |
-| Pattern miner + `patterns/ml_synthesizer.py` | `api/core/brain/patterns/miner.py` | `scikit-learn` dep, flag-gated like reference | TODO |
-| `blockers/` | `api/core/brain/patterns/blockers.py` + model | | TODO |
-| `epistemic/store.py` (Postgres) | `api/models/brain_epistemic.py` + store | Observation/Belief bi-temporal | TODO |
-| `autonomy/` (engine, gate, trust_meter, metrics_collector, postgres_store) | `api/core/brain/autonomy/` + `api/models/brain_autonomy.py` | **`workflow_kinds.py` enum → per-tenant registry table** (vertical-agnostic requirement) | TODO |
-| `approval/` (gateway, confidence_router) | `api/core/brain/autonomy/approval.py` | Maps verdicts → Dify Human Input (wiring in Batch 4) | TODO |
+| DecisionCase store (`patterns/{models,store,postgres_store}.py` — the map's `bootstrap/decision_case.py` does not exist in the reference) | `api/models/brain_decision.py` + `api/core/brain/patterns/{models,store,case_store}.py` | Tenant-scoped; SQLAlchemy rewrite; idempotent append; scenario/stage genericised to str | PORTED |
+| `patterns/postgres_rule_store.py` + as-of router (`temporal_resolver.py` does not exist — the logic is `patterns/router.py` + miner contradiction resolution) | `api/models/brain_rules.py` + `api/core/brain/patterns/{rule_store,router}.py` | Bi-temporal fields verbatim (`valid_from…last_seen_at`) | PORTED |
+| Pattern miner closure (`pattern_miner`, `extractor`, `condition_synthesizer`, `confidence`, `scenario_features`, `ml_synthesizer`) | `api/core/brain/patterns/` | scikit-learn (already in via mapie), flag-gated like reference; risk/feature vocabularies injected (pack: `risk_scenarios` pending loader, `scenario_features.yaml`); prometheus hooks no-op until Batch 4/5 | PORTED |
+| `blockers/` | `api/core/brain/patterns/{blockers,blocker_store}.py` + `api/models/brain_blockers.py` | Genericised: blocker/action kinds str; defaults + vocabulary in `packs/hospitality/blockers.yaml`; PMS auto-detect rules behind injectable ViolationDetector seam (reference logic preserved in tests until Batch 6 pack-behaviour design) | PORTED |
+| Epistemic persistent store (reference never shipped one — written fresh per rule 7) | `api/models/brain_epistemic.py` + `api/core/brain/epistemic/sa_store.py` | Observation append-only + integrity hash at rest; belief overwrite-on-promote | PORTED |
+| `autonomy/` (engine, gate, trust_meter, metrics_collector, postgres_store) | `api/core/brain/autonomy/` + `api/models/brain_autonomy.py` | workflow_kinds enum → `brain_workflow_kinds` registry rows + WorkflowKindRegistry; 12 hospitality kinds + event aliases + incident types in `packs/hospitality/workflow_kinds.yaml`; `calendar_gate.py` not in this row — still in reference | PORTED |
+| `approval/` (gateway, confidence_router) | `api/core/brain/autonomy/approval.py` | Non-blocking rewrite (PENDING/resolve/expire — asyncio.Event wait not portable; Human Input wiring Batch 4, timeout sweep beat job Batch 5); ActionType + routing sets → str + `packs/hospitality/approval.yaml` | PORTED |
 
 ## Batch 3 — Memory tiers
 

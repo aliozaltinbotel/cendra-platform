@@ -310,9 +310,9 @@ class PatternMiner:
     def _count_scenario_totals(
         self,
         buckets: dict[tuple[str, str, DecisionType], list[DecisionCase]],
-    ) -> dict[tuple[str, Scenario], int]:
+    ) -> dict[tuple[str, str], int]:
         """Aggregate total case count per ``(scope_id, scenario)``."""
-        totals: Counter[tuple[str, Scenario]] = Counter()
+        totals: Counter[tuple[str, str]] = Counter()
         for (scope_id, scenario, _action), cases in buckets.items():
             totals[(scope_id, scenario)] += len(cases)
         return dict(totals)
@@ -392,9 +392,9 @@ class PatternMiner:
     @staticmethod
     def _index_by_scenario(
         buckets: dict[tuple[str, str, DecisionType], list[DecisionCase]],
-    ) -> dict[tuple[str, Scenario], dict[DecisionType, list[DecisionCase]]]:
+    ) -> dict[tuple[str, str], dict[DecisionType, list[DecisionCase]]]:
         """Group bucket keys by ``(scope_id, scenario)``."""
-        index: dict[tuple[str, Scenario], dict[DecisionType, list[DecisionCase]]] = defaultdict(dict)
+        index: dict[tuple[str, str], dict[DecisionType, list[DecisionCase]]] = defaultdict(dict)
         for (scope_id, scenario, action), cases in buckets.items():
             index[(scope_id, scenario)][action] = cases
         return index
