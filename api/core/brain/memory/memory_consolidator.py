@@ -19,10 +19,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
-
-import litellm
 
 from core.brain.memory.episodic_memory import Episode, EpisodicMemory
 from core.brain.memory.knowledge_graph import (
@@ -76,12 +75,16 @@ class MemoryConsolidator:
         surprise_detector: SurpriseDetector,
         model: str = "gpt-4o-mini",
         consolidation_interval_hours: float = 1.0,
+        completion: Callable[[str], str] | None = None,
     ) -> None:
+        # completion: prompt -> model text (the reference called litellm
+        # directly — retired; Dify llm_generator adapter lands Batch 4/5)
         self._episodic = episodic
         self._semantic = semantic
         self._kg = knowledge_graph
         self._surprise = surprise_detector
         self._model = model
+        self._completion = completion
         self._interval = timedelta(hours=consolidation_interval_hours)
         self._last_consolidation: datetime | None = None
 
@@ -192,17 +195,11 @@ class MemoryConsolidator:
 
         prompt = _ENTITY_EXTRACTION_PROMPT.format(events=events_text)
 
+        if self._completion is None:
+            logger.debug("entity extraction skipped — no completion seam wired (Batch 4/5)")
+            return None
         try:
-            response = litellm.acompletion(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": "You are an entity extraction engine. Return valid JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=2000,
-            )
-            text = response.choices[0].message.content or ""
+            text = self._completion(prompt) or ""
             # Extract JSON from response (handle markdown code blocks)
             json_match = re.search(r"\{[\s\S]*\}", text)
             if json_match:

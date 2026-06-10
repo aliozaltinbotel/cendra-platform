@@ -16,6 +16,11 @@ Supports two backends:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import redis
+
 import json
 import logging
 import time
@@ -24,7 +29,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from core.brain.memory.observe import emit_memory_retrieved
 
@@ -117,11 +122,13 @@ class JsonFileBackend(EpisodicBackend):
         data = [ep.to_dict() for ep in self._episodes]
         self._path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
+    @override
     def append(self, episode: Episode) -> None:
         self._load()
         self._episodes.append(episode)
         self._save()
 
+    @override
     def get_recent(self, n: int, session_id: str | None = None) -> list[Episode]:
         self._load()
         episodes = self._episodes
@@ -129,6 +136,7 @@ class JsonFileBackend(EpisodicBackend):
             episodes = [e for e in episodes if e.session_id == session_id]
         return episodes[-n:]
 
+    @override
     def get_by_time_range(self, start: datetime, end: datetime, session_id: str | None = None) -> list[Episode]:
         self._load()
         results = []
@@ -138,10 +146,12 @@ class JsonFileBackend(EpisodicBackend):
                     results.append(ep)
         return results
 
+    @override
     def get_session_history(self, session_id: str) -> list[Episode]:
         self._load()
         return [e for e in self._episodes if e.session_id == session_id]
 
+    @override
     def clear(self, session_id: str | None = None) -> None:
         self._load()
         if session_id:
@@ -167,7 +177,7 @@ class RedisBackend(EpisodicBackend):
         self,
         redis_url: str = "redis://localhost:6379",
         key_prefix: str = "brain:episodic:",
-        redis_client: object | None = None,
+        redis_client: redis.Redis | None = None,
         ttl_seconds: int | None = 86400 * 30,  # 30 days default
     ) -> None:
         import redis
@@ -184,6 +194,7 @@ class RedisBackend(EpisodicBackend):
             return f"{self._prefix}session:{session_id}"
         return f"{self._prefix}global"
 
+    @override
     def append(self, episode: Episode) -> None:
         key = self._key(episode.session_id)
         global_key = self._key(None)
@@ -197,21 +208,25 @@ class RedisBackend(EpisodicBackend):
             pipeline.expire(key, self._ttl)
         pipeline.execute()
 
+    @override
     def get_recent(self, n: int, session_id: str | None = None) -> list[Episode]:
         key = self._key(session_id)
         raw_entries = self._redis.zrevrange(key, 0, n - 1)
         return [Episode.from_dict(json.loads(r)) for r in reversed(raw_entries)]
 
+    @override
     def get_by_time_range(self, start: datetime, end: datetime, session_id: str | None = None) -> list[Episode]:
         key = self._key(session_id)
         raw_entries = self._redis.zrangebyscore(key, start.timestamp(), end.timestamp())
         return [Episode.from_dict(json.loads(r)) for r in raw_entries]
 
+    @override
     def get_session_history(self, session_id: str) -> list[Episode]:
         key = self._key(session_id)
         raw_entries = self._redis.zrange(key, 0, -1)
         return [Episode.from_dict(json.loads(r)) for r in raw_entries]
 
+    @override
     def clear(self, session_id: str | None = None) -> None:
         key = self._key(session_id)
         self._redis.delete(key)
@@ -334,5 +349,6 @@ class EpisodicMemory:
         """Clear all episodes for the current session."""
         self._backend.clear(session_id=self.session_id)
 
+    @override
     def __repr__(self) -> str:
         return f"EpisodicMemory(session_id={self.session_id!r}, backend={type(self._backend).__name__})"

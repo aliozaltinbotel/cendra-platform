@@ -286,7 +286,7 @@ class SemanticMemory:
 
         qdrant_filter = None
         if metadata_filter:
-            conditions = [
+            conditions: list[models.Condition] = [
                 models.FieldCondition(
                     key=key,
                     match=models.MatchValue(value=value),
@@ -296,15 +296,16 @@ class SemanticMemory:
             qdrant_filter = models.Filter(must=conditions)
 
         t0 = time.perf_counter()
-        response = self._client.query_points(
+        # qdrant-client 1.9 (Dify pin) has no query_points; search() is the
+        # equivalent dense query on this API surface.
+        results = self._client.search(
             collection_name=self.collection_name,
-            query=query_vector,
+            query_vector=query_vector,
             limit=top_k,
             score_threshold=score_threshold,
             query_filter=qdrant_filter,
         )
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        results = response.points
 
         records = [
             MemoryRecord(

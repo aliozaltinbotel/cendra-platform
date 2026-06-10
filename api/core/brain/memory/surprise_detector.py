@@ -23,6 +23,11 @@ Also implements Ebbinghaus Forgetting Curve from MemoryBank:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import redis
+
 import logging
 import math
 from dataclasses import dataclass
@@ -124,12 +129,15 @@ class SurpriseDetector:
         surprise_threshold: float = 0.4,
         decay_rate: float = 0.1,
         workspace_id: str = "",
+        redis_client: redis.Redis | None = None,
     ) -> None:
-        import redis.asyncio as aioredis
+        import redis
 
         from core.brain.memory.tenant import build_prefix
 
-        self._redis = aioredis.from_url(redis_url, decode_responses=True)
+        # Sync client (Dify runtime); deployments inject the shared
+        # extensions.ext_redis client via redis_client.
+        self._redis = redis_client if redis_client is not None else redis.from_url(redis_url, decode_responses=True)
         self._surprise_threshold = surprise_threshold
         self._decay_rate = decay_rate
         self._prefix = build_prefix("brain:surprise:", workspace_id)

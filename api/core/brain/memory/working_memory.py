@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, override
 
 from core.brain.memory.observe import emit_memory_retrieved
 
@@ -237,5 +237,6 @@ class WorkingMemory:
             "turns": [{"role": t.role, "content": t.content, "metadata": t.metadata} for t in self._turns],
         }
 
+    @override
     def __repr__(self) -> str:
         return f"WorkingMemory(turns={len(self._turns)}/{self.max_turns}, session={self.session_id!r})"

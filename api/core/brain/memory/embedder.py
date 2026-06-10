@@ -27,7 +27,7 @@ import logging
 import math
 import os
 from collections.abc import Sequence
-from typing import Final, Protocol, runtime_checkable
+from typing import Final, Protocol, override, runtime_checkable
 
 import httpx
 
@@ -105,5 +105,6 @@ class RemoteEmbedder:
             raise ValueError(f"embedding pod returned {len(rows)} vectors for {len(texts)} inputs")
         return [_normalize([float(v) for v in row["embedding"]]) for row in rows]
 
+    @override
     def __repr__(self) -> str:
         return f"RemoteEmbedder(endpoint={self._endpoint!r}, model={self._model!r})"

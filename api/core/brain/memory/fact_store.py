@@ -333,8 +333,6 @@ class FactStore:
         if client is None:
             return
 
-        import asyncio
-
         from qdrant_client.models import PointStruct
 
         point = PointStruct(
@@ -352,8 +350,7 @@ class FactStore:
             },
         )
 
-        asyncio.to_thread(
-            client.upsert,
+        client.upsert(
             collection_name=self._collection,
             points=[point],
         )
@@ -366,17 +363,16 @@ class FactStore:
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Run a vector similarity search against Qdrant."""
-        import asyncio
-
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        from qdrant_client.models import Condition, FieldCondition, Filter, MatchValue
 
         qdrant_filter = None
         if filters:
-            conditions = [FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()]
+            conditions: list[Condition] = [
+                FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()
+            ]
             qdrant_filter = Filter(must=conditions)
 
-        results = asyncio.to_thread(
-            client.search,
+        results = client.search(
             collection_name=self._collection,
             query_vector=vector,
             limit=top_k,
@@ -392,16 +388,13 @@ class FactStore:
         limit: int,
     ) -> list[dict[str, Any]]:
         """Scroll through all facts for a property (no vector needed)."""
-        import asyncio
-
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         qdrant_filter = Filter(
             must=[FieldCondition(key="property_id", match=MatchValue(value=property_id))],
         )
 
-        results = asyncio.to_thread(
-            client.scroll,
+        results = client.scroll(
             collection_name=self._collection,
             scroll_filter=qdrant_filter,
             limit=limit,
@@ -412,12 +405,9 @@ class FactStore:
 
     def _delete_point(self, client: Any, fact_id: str) -> None:
         """Delete a single point from Qdrant."""
-        import asyncio
-
         from qdrant_client.models import PointIdsList
 
-        asyncio.to_thread(
-            client.delete,
+        client.delete(
             collection_name=self._collection,
             points_selector=PointIdsList(points=[fact_id]),
         )
@@ -431,17 +421,14 @@ class FactStore:
                 logger.warning("Embedding function failed for: %s", text[:60])
                 return None
 
-        # Fallback: try litellm embedding
+        # Fallback (litellm in the reference — retired): the embedding pod
+        # via the Embedder seam, when configured; degraded None otherwise.
         try:
-            import litellm
+            from core.brain.memory.embedder import RemoteEmbedder
 
-            response = litellm.aembedding(
-                model="text-embedding-3-small",
-                input=[text],
-            )
-            return response.data[0]["embedding"]
+            return RemoteEmbedder().encode(text)
         except Exception:
-            logger.warning("litellm embedding failed for: %s", text[:60])
+            logger.warning("embedding-pod fallback failed for: %s", text[:60])
             return None
 
     @staticmethod

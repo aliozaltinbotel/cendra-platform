@@ -17,6 +17,11 @@ Storage: Redis for graph structure + Qdrant for semantic search over knowledge.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import redis
+
 import json
 import logging
 import time
@@ -127,12 +132,15 @@ class TemporalKnowledgeGraph:
         self,
         redis_url: str = "redis://localhost:6379",
         workspace_id: str = "",
+        redis_client: redis.Redis | None = None,
     ) -> None:
-        import redis.asyncio as aioredis
+        import redis
 
         from core.brain.memory.tenant import build_prefix
 
-        self._redis = aioredis.from_url(redis_url, decode_responses=True)
+        # Sync client (Dify runtime); deployments inject the shared
+        # extensions.ext_redis client via redis_client.
+        self._redis = redis_client if redis_client is not None else redis.from_url(redis_url, decode_responses=True)
         self._prefix = build_prefix("brain:kg:", workspace_id)
 
     def _key(self, *parts: str) -> str:

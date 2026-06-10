@@ -448,6 +448,14 @@ class ContradictionDetector:
         existing: StoredFact,
     ) -> ContradictionPair:
         """Use LLM to determine semantic contradiction."""
+        if self._llm is None:
+            return ContradictionPair(
+                existing_fact=existing,
+                new_content=new_content,
+                is_contradiction=False,
+                explanation="no contradiction LLM wired",
+                confidence=0.0,
+            )
         try:
             result = self._llm.check_contradiction(
                 fact_a=existing.content,
