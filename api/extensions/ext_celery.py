@@ -1,3 +1,4 @@
+import os
 import ssl
 from datetime import timedelta
 from typing import Any
@@ -250,6 +251,30 @@ def init_app(app: DifyApp) -> Celery:
 
     if dify_config.ENTERPRISE_ENABLED and dify_config.ENTERPRISE_TELEMETRY_ENABLED:
         imports.append("tasks.enterprise_telemetry_task")
+
+    # CENDRA-HOOK(T5): additive brain beat entries — active only when the
+    # brain rollout switch is on (BRAIN_GATES_MODE != off); see
+    # tasks/brain_consolidation.py, tasks/brain_maintenance.py and
+    # FORK_LEDGER.md.
+    if os.environ.get("BRAIN_GATES_MODE", "off").strip().lower() != "off":
+        imports.extend(["tasks.brain_consolidation", "tasks.brain_maintenance"])
+        beat_schedule["brain_memory_consolidation"] = {
+            "task": "tasks.brain_consolidation.brain_memory_consolidation_task",
+            "schedule": crontab(minute="20", hour="3"),
+        }
+        beat_schedule["brain_pattern_mining"] = {
+            "task": "tasks.brain_maintenance.brain_pattern_mining_task",
+            "schedule": crontab(minute="40", hour="3"),
+        }
+        beat_schedule["brain_autonomy_eval"] = {
+            "task": "tasks.brain_maintenance.brain_autonomy_eval_task",
+            "schedule": crontab(minute="0", hour="4"),
+        }
+        beat_schedule["brain_friction_decay"] = {
+            "task": "tasks.brain_maintenance.brain_friction_decay_task",
+            "schedule": crontab(minute="20", hour="4"),
+        }
+
     celery_app.conf.update(beat_schedule=beat_schedule, imports=imports)
 
     return celery_app

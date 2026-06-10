@@ -125,11 +125,32 @@ class _MonitorComplianceGate:
         return ComplianceVerdict(kind=kind, rationale=verdict.rationale)
 
 
+def _calibration_store_for(tenant_id: str):
+    """Persistent store when the Dify DB is initialised; memory otherwise.
+
+    Batch 5: enforce-mode evidence survives pod restarts.  Unit tests and
+    pre-init code paths fall back to the per-process window.
+    """
+    try:
+        from sqlalchemy.orm import sessionmaker
+
+        from core.brain.abstention.sa_store import SQLAlchemyCalibrationStore
+        from extensions.ext_database import db
+
+        engine = db.engine  # raises outside an initialised Flask app
+        return SQLAlchemyCalibrationStore(
+            session_maker=sessionmaker(bind=engine, expire_on_commit=False),
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        return _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
+
+
 def _adapter_for(tenant_id: str) -> DecisionPipelineAdapter:
     with _lock:
         adapter = _adapters.get(tenant_id)
         if adapter is None:
-            store = _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
+            store = _calibration_store_for(tenant_id)
             adapter = DecisionPipelineAdapter(
                 abstention_gate=AbstentionGate(calibrator=ConformalCalibrator(store=store)),
                 risk_gate=RiskGate(),
@@ -209,7 +230,7 @@ def record_tool_outcome(
     from core.brain.abstention.models import CalibrationSample
 
     with _lock:
-        store = _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
+        store = _calibration_store_for(tenant_id)
     store.record(
         CalibrationSample.now(
             tool_id=tool_id,
