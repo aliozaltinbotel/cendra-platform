@@ -148,6 +148,33 @@ class DifyAgentNode(Node[DifyAgentNodeData]):
             "agent_config_snapshot_id": bundle.snapshot.id,
             "binding_id": bundle.binding.id,
         }
+
+        # CENDRA-HOOK(T3): brain gate + memory layer for the agent loop —
+        # off by default (BRAIN_GATES_MODE); see cendra_brain_layer.py
+        # and FORK_LEDGER.md.
+        from core.workflow.nodes.agent_v2.cendra_brain_layer import gate_agent_run, record_agent_run
+
+        brain_refusal = gate_agent_run(
+            tenant_id=dify_ctx.tenant_id,
+            app_id=dify_ctx.app_id,
+            agent_id=str(bundle.agent.id),
+        )
+        if brain_refusal is not None:
+            yield self._failure_event(
+                inputs=inputs,
+                process_data=process_data,
+                metadata=metadata,
+                error=brain_refusal,
+                error_type="CendraBrainGateRefusal",
+            )
+            return
+        record_agent_run(
+            tenant_id=dify_ctx.tenant_id,
+            app_id=dify_ctx.app_id,
+            agent_id=str(bundle.agent.id),
+            workflow_run_id=workflow_run_id,
+            status="started",
+        )
         session_scope = WorkflowAgentSessionScope(
             tenant_id=dify_ctx.tenant_id,
             app_id=dify_ctx.app_id,
