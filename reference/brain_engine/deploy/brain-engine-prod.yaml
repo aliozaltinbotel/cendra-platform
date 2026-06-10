@@ -1,0 +1,73 @@
+replicaCount: 2
+
+image:
+  repository: "booklycontainer.azurecr.io/brainengine"
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  externalPort: 80
+  internalPort: 8000
+  annotations: {}
+
+env:
+  ENVIRONMENT: "production"
+  AZURE_CLIENT_ID: "a9ba12ad-a730-4ea1-a88d-9faeaf320831"
+  AZURE_KEYVAULT_URL: "https://prod-botel-keyvault.vault.azure.net/"
+  LOG_LEVEL: "info"
+  WORKERS: "4"
+  PYTHONUNBUFFERED: "1"
+  # DecisionCase store backend. Prod stays on in-memory until a prod
+  # cendra-pg cluster is provisioned and DATABASE_URL is set here.
+  # Values: "memory" | "dual" | "postgres" — see
+  # brain_engine.patterns.wiring.build_decision_case_store.
+  DECISION_CASE_STORE_BACKEND: "memory"
+  # Blocker store backend.  Prod stays on "memory" until a prod
+  # cendra-pg cluster and `blockers` table (migration 002) exist and
+  # DATABASE_URL / BLOCKER_STORE_DATABASE_URL are set here.  Values:
+  # "memory" | "postgres" — see api_server/server.py lifespan.
+  BLOCKER_STORE_BACKEND: "memory"
+  # Interview answer store backend.  Prod stays on "memory" until a
+  # prod cendra-pg cluster and `interview_answers` table (migration
+  # 004) exist and DATABASE_URL / INTERVIEW_STORE_DATABASE_URL are
+  # set here.  Values: "memory" | "postgres" — see
+  # api_server/server.py lifespan.
+  INTERVIEW_STORE_BACKEND: "memory"
+
+resources:
+  requests:
+    cpu: "800m"
+    memory: "1300Mi"
+
+readinessProbe:
+  enabled: false
+
+livenessProbe:
+  enabled: false
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+imagePullSecrets:
+  - name: acr-secret
+
+updateStrategy: {}
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 3
+  cpuTarget: 85
+  memoryTarget: 85
+
+ingress:
+  enabled: false
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app: brain-engine

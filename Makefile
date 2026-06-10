@@ -212,3 +212,9 @@ help:
 
 # Phony targets
 .PHONY: build-web build-api push-web push-api build-all push-all build-push-all dev-setup prepare-docker prepare-web prepare-api dev-clean help format check lint api-contract-lint type-check test test-all
+
+# Cendra (C4 in FORK_LEDGER.md): fail on unregistered divergence from upstream
+fork-drift:
+	@./scripts/check_fork_drift.sh
+
+.PHONY: fork-drift

@@ -1,0 +1,120 @@
+version: "3.9"
+
+# Observability stack — kept in a SEPARATE compose file from the main
+# docker-compose.dev.yml so a misconfigured monitoring deploy cannot
+# brick the running brain_engine dev environment.  Bring it up with:
+#
+#   docker compose -f docker-compose.observability.yml up -d
+#
+# Tear down without touching app data:
+#
+#   docker compose -f docker-compose.observability.yml down
+#
+# All four services live on a dedicated bridge network and reach the
+# host-side uvicorn (port 8000) via host.docker.internal so the
+# prometheus scraper does not require the brain_engine API to live
+# inside docker.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: brain-engine-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=14d"
+      - "--web.enable-lifecycle"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: brain-engine-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - observability
+
+  langfuse-postgres:
+    image: postgres:16
+    container_name: brain-engine-langfuse-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse_dev
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - observability
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: brain-engine-langfuse
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse_dev@langfuse-postgres:5432/langfuse
+      NEXTAUTH_SECRET: dev-langfuse-nextauth-secret-change-me
+      SALT: dev-langfuse-salt-change-me
+      NEXTAUTH_URL: http://localhost:3001
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_DEFAULT_PROJECT_ID: brain-engine-dev
+      LANGFUSE_DEFAULT_PROJECT_ROLE: ADMIN
+      # Auto-provisioning on first boot — recreates the org / project /
+      # admin user / API keys when the langfuse-postgres volume is
+      # empty.  Lets us wire the brain_engine LangfuseTracer with
+      # known keys without clicking through the UI.  Documented at
+      # https://langfuse.com/self-hosting/configuration#initial-setup.
+      LANGFUSE_INIT_ORG_ID: brain-engine-dev
+      LANGFUSE_INIT_ORG_NAME: Devlet Brain
+      LANGFUSE_INIT_PROJECT_ID: cendra-llm
+      LANGFUSE_INIT_PROJECT_NAME: cendra-llm
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-dev-brain-engine-public-key
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-dev-brain-engine-secret-key
+      LANGFUSE_INIT_USER_EMAIL: devlet@cendra.ai
+      LANGFUSE_INIT_USER_NAME: Devlet Brain
+      LANGFUSE_INIT_USER_PASSWORD: brain-engine-dev-admin
+    networks:
+      - observability
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  langfuse-postgres-data:

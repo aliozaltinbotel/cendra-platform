@@ -1,0 +1,5 @@
+# Property dumps contain guest PII, booking amounts, and private
+# message content — keep them out of git.  Track only the notebook
+# and this .gitignore itself.
+*.csv
+!explore_dump.ipynb

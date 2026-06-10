@@ -1,0 +1,492 @@
+replicaCount: 1
+
+image:
+  repository: "booklycontainer.azurecr.io/brainengine"
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  externalPort: 80
+  internalPort: 8000
+  annotations: {}
+
+env:
+  ENVIRONMENT: "development"
+  AZURE_CLIENT_ID: "a9ba12ad-a730-4ea1-a88d-9faeaf320831"
+  AZURE_KEYVAULT_URL: "https://prod-botel-keyvault.vault.azure.net/"
+  REDIS_URL: "REDACTED-AT-VENDOR"  # live credential removed before publication (see PROVENANCE.md)
+  LOG_LEVEL: "debug"
+  WORKERS: "2"
+  PYTHONUNBUFFERED: "1"
+  # Qdrant (Semantic Memory / Vector Search) — StatefulSet from deploy/qdrant.yaml
+  # Apply first: kubectl apply -f deploy/qdrant.yaml -n dev
+  QDRANT_URL: "http://qdrant:6333"
+  # Auth0 M2M credentials retained for non-PMS service-to-service
+  # callers (kept by request 2026-04-28 even after the PMS REST surface
+  # was retired) — Brain Engine itself no longer issues these tokens.
+  AUTH0_M2M_CLIENT_ID: "RrQMELIL4VEcJ9gqw1xHiWK8XSz69wS7"
+  AUTH0_M2M_CLIENT_SECRET: "REDACTED-AT-VENDOR"  # live credential removed before publication (see PROVENANCE.md)
+  AUTH0_DOMAIN: "https://botel.eu.auth0.com/oauth/token"
+  AUTH0_AUDIENCE: "https://booklyreservationapi.azurewebsites.net"
+  # Public OpenAI key intentionally absent — every LLM call routes
+  # through Azure OpenAI via ``brain_engine/models/azure_routing.py``
+  # at startup.  Adding ``OPENAI_API_KEY`` here would re-introduce a
+  # bypass path and cause litellm to charge a public OpenAI account
+  # instead of the tenant's capped Azure resource.
+  # PostgreSQL (CNPG Cluster `dev/cendra-pg`, PG17.5 + pgvector 0.8).
+  # Password is CNPG-auto-generated — read from secret `cendra-pg-app`:
+  #   kubectl get secret cendra-pg-app -n dev -o jsonpath='{.data.uri}' | base64 -d
+  # Without DATABASE_URL the engine falls back to in-pod SQLite
+  # (brain_engine/conversation/db/engine.py:_resolve_database_url).
+  DATABASE_URL: "REDACTED-AT-VENDOR"  # live credential removed before publication (see PROVENANCE.md)
+  # DecisionCase store backend — selects which DecisionCaseStore
+  # implementation brain_engine.patterns.wiring.build_decision_case_store
+  # returns.  Values: "memory" (no Postgres writes), "dual" (InMemory
+  # primary + Postgres shadow — safe migration mode), "postgres" (full
+  # cutover to cendra-pg).  Reuses DATABASE_URL above for the Postgres
+  # connection when backend != "memory".
+  # Promoted to "postgres" on 2026-04-30 after 11 days of dual-mode
+  # soak (since 2026-04-19): cendra-pg has received every case and
+  # the in-memory primary is the only thing causing per-replica view
+  # divergence on bootstrap reads.  Cutover gives Mümin's Scenario A
+  # (WiFi-by-stage) and Scenario B (door-code refusal) a single
+  # consistent read surface across replicas.
+  DECISION_CASE_STORE_BACKEND: "postgres"
+  # PatternRule store backend — selects which PatternRuleStore
+  # brain_engine.patterns.wiring.build_pattern_rule_store returns.
+  # Values: "memory" (InMemoryPatternRuleStore, lost on restart) or
+  # "postgres" (PostgresPatternRuleStore against the `pattern_rules`
+  # table in cendra-pg; provisioned by migration 001 in
+  # deploy/postgres-migrations.yaml).  No "dual" mode exists because
+  # PatternRule is mutable — dual writes would split-brain
+  # confidence / support_count on every update.
+  PATTERN_RULE_STORE_BACKEND: "postgres"
+  # Property profile store backend — selects which PropertyProfileStore
+  # api_server/server.py wires (PROPERTY_PROFILE_STORE_BACKEND, default
+  # "memory").  Values: "memory" (InMemoryPropertyProfileStore, LOST on
+  # every pod restart) or "postgres" (PgPropertyProfileStore against the
+  # `property_profiles` table in cendra-pg; provisioned by
+  # infra/postgres-init/012_property_profiles.sql).  Reuses DATABASE_URL
+  # above.  Cutover to "postgres" so a primed property's profile survives
+  # restarts: with "memory" the profile vanished on restart while
+  # property_state (Postgres) stayed "primed", so the bootstrap dedup
+  # short-circuited re-harvest and the agent deferred every answer
+  # ("no info, I'll ask the PM") even though the data was present in ES.
+  # Pairs with the request_bootstrap self-heal (profile_exists_probe).
+  PROPERTY_PROFILE_STORE_BACKEND: "postgres"
+  # Blocker store backend — selects which BlockerStore is wired in
+  # api_server/server.py lifespan.  Values: "memory"
+  # (InMemoryBlockerStore, lost on restart) or "postgres" (PgBlockerStore
+  # against the `blockers` table in cendra-pg; provisioned by migration
+  # 002 in deploy/postgres-migrations.yaml).  The Postgres URL defaults
+  # to DATABASE_URL above unless BLOCKER_STORE_DATABASE_URL is set.
+  BLOCKER_STORE_BACKEND: "postgres"
+  # Autonomy store backend — selects the AutonomyStore wired in
+  # api_server/server.py lifespan for the V2 Trust Meter endpoint.
+  # Values: "memory" (InMemoryAutonomyStore, lost on restart) or
+  # "postgres" (PgAutonomyStore against the `workflow_autonomy` table
+  # in cendra-pg; provisioned by migration 003 in
+  # deploy/postgres-migrations.yaml).  The Postgres URL defaults to
+  # DATABASE_URL above unless AUTONOMY_STORE_DATABASE_URL is set.
+  AUTONOMY_STORE_BACKEND: "postgres"
+  # Interview answer store backend — selects which
+  # InterviewAnswerStore is wired in api_server/server.py lifespan
+  # for the V2 proactive PM Q&A endpoints.  Values: "memory"
+  # (InMemoryInterviewAnswerStore, lost on restart) or "postgres"
+  # (PgInterviewAnswerStore against the `interview_answers` table
+  # in cendra-pg; provisioned by migration 004 in
+  # deploy/postgres-migrations.yaml).  The Postgres URL defaults to
+  # DATABASE_URL above unless INTERVIEW_STORE_DATABASE_URL is set.
+  INTERVIEW_STORE_BACKEND: "postgres"
+  # Decision card store backend — selects which CardStore is wired
+  # in api_server/server.py lifespan for the V2 five-slot UI
+  # artefact lifecycle (PENDING → CONFIRMED / DISMISSED / EXPIRED).
+  # Values: "memory" (InMemoryCardStore, lost on restart) or
+  # "postgres" (PgCardStore against the `decision_cards` table in
+  # cendra-pg; provisioned by migration 005 in
+  # deploy/postgres-migrations.yaml).  The Postgres URL defaults
+  # to DATABASE_URL above unless CARD_STORE_DATABASE_URL is set.
+  CARD_STORE_BACKEND: "postgres"
+  # Unified GraphQL data layer (Cendra onboarding-api).  When
+  # UNIFIED_DATA_CUSTOMER_ID is set, api_server/server.py wires a
+  # UnifiedReservationsTimelineSource into the NarrativeService so the
+  # property timeline can blend Cendra's cross-provider reservation
+  # history (Hostaway, Lodgify, Calry, Channex, Guesty, WhatsApp) with
+  # the in-house DecisionCase + GuestHistory sources.  Empty values
+  # disable the adapter without breaking startup.  Workspace UUIDs
+  # discovered via ES aggregation on `unified_reservations` (2026-04-21).
+  UNIFIED_DATA_BASE_URL: "http://onboarding-api.dev.svc.cluster.local"
+  UNIFIED_DATA_CUSTOMER_ID: "92bbd684-220b-4b73-a9c2-be9ff4a2e55d"
+  UNIFIED_DATA_ORG_ID: "dc7822aa-b002-42db-84a3-e7781afc1d07"
+  UNIFIED_DATA_PROVIDER_TYPE: "HOSTAWAY"
+  # Direct Elasticsearch property enrichment (2026-06-09).  The GraphQL
+  # `property()` resolver projects only a subset of the ES `properties`
+  # document; the harvester overlays the full doc (PricingSettings fees,
+  # WiFi creds, amenities, descriptions, fees, cancellation policies)
+  # onto `static_payload` when this is enabled.  Opt-in + fail-open: with
+  # the flag off or the API key absent the harvest is GraphQL-only.
+  ES_ENRICHMENT_ENABLED: "1"
+  ELASTICSEARCH_ENDPOINT: "https://elasticsearch-cluster-es-http.elasticsearch.svc:9200"
+  # SECRET — do NOT commit the value.  Set the read-only API key (the
+  # base64 `id:api_key` "encoded" form) out-of-band, e.g.
+  #   kubectl set env -n dev deploy/brain-engine ELASTICSEARCH_API_KEY=<encoded>
+  # or via the Azure Key Vault secret pipeline used for other keys.
+  # ELASTICSEARCH_API_KEY: "<set-out-of-band>"
+  # Onboarding bootstrap archive source.  Retained as an env var for
+  # observability; every value collapses to the unified GraphQL
+  # gateway since the Botel PMS REST loader was retired 2026-04-28.
+  # Historical cases emitted by this pipeline are tagged
+  # ``CaseSource.HISTORICAL`` and capped below the AUTO confidence
+  # band until a live observation confirms them.
+  ONBOARDING_ARCHIVE_SOURCE: "graphql"
+  # Azure Service Bus — retained for forward compatibility with a
+  # future cascade-event subscriber.  As of 2026-04-29 the cascade
+  # memory consumer has been retired; the
+  # subscription itself stays provisioned so a replacement subscriber
+  # can be wired without re-provisioning Service Bus topology.
+  AZURE_SERVICEBUS_CONNECTION_STRING: "REDACTED-AT-VENDOR"  # live credential removed before publication (see PROVENANCE.md)
+  AZURE_SERVICEBUS_SUBSCRIPTION: "brain-engine-cascade"
+  AZURE_SERVICEBUS_TOPIC_PROPERTY: "botel-property-sync"
+  AZURE_SERVICEBUS_TOPIC_RESERVATION: "botel-reservation-sync"
+  AZURE_SERVICEBUS_TOPIC_CONVERSATION: "botel-conversation-sync"
+  AZURE_SERVICEBUS_TOPIC_GUEST: "botel-guest-sync"
+  AZURE_SERVICEBUS_TOPIC_REVIEW: "botel-review-sync"
+  AZURE_SERVICEBUS_TOPIC_RATEPLAN: "botel-rateplan-sync"
+  # Sandbox replay backends — V1 onboarding step 14.  ``postgres``
+  # routes UnansweredThread rows through PgUnansweredThreadStore (table
+  # created by migration 011); ``azure_openai`` swaps the deterministic
+  # template generator for an LLM-backed one that grounds answers in
+  # the property profile.  The hardened system prompt forbids invented
+  # specifics (prices, codes, addresses, time-of-day windows) and the
+  # PgUnansweredThread row carries ``needs_review_reason`` so the UI
+  # can surface heuristic flags.  All failures degrade to in-memory +
+  # template — the sandbox endpoint never 503s on misconfiguration.
+  SANDBOX_STORE_BACKEND: "postgres"
+  SANDBOX_GENERATOR_BACKEND: "azure_openai"
+  # PM-confirmed knowledge persistence — manager replies to BRAIN gaps
+  # land in ``property_pm_facts`` (migration 013) so the next guest
+  # message gets the answer instead of repeating the original flag.
+  # ``postgres`` requires ``DATABASE_URL`` to point at cendra-pg; a
+  # misconfiguration silently degrades to in-memory so the regenerate
+  # endpoint never 503s on an ops mistake.
+  PM_FACT_STORE_BACKEND: "postgres"
+  # Azure OpenAI — botel-llm tenant resource (chat: gpt-4o-mini).
+  # Tenant-level, not project-scoped: any Cendra service can call it
+  # with the same key.  AZURE_OPENAI_DEPLOYMENT doubles as the default
+  # for SANDBOX_GENERATOR_MODEL when the latter is unset.
+  AZURE_OPENAI_API_KEY: "REDACTED-AT-VENDOR"  # live credential removed before publication (see PROVENANCE.md)
+  AZURE_OPENAI_ENDPOINT: "https://botel-llm.openai.azure.com/"
+  AZURE_OPENAI_API_VERSION: "2024-08-01-preview"
+  AZURE_OPENAI_DEPLOYMENT: "gpt-4o-mini"
+  AZURE_OPENAI_GPT4O_DEPLOYMENT: "gpt-4o"
+  AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT: "gpt-4o-mini"
+  # Embedding deployment used by the Azure embedder for vector-store
+  # writes (Qdrant).  Must exist on the tenant's ``botel-llm``
+  # resource.
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT: "text-embedding-3-large"
+  # ──────────────────────────────────────────────────────────────────
+  # CLAUDE_CODE_WIRING_FIX_PLAN.md / wiring_session_2026-05-07.md
+  # rollout flags.  Activated one-at-a-time with 24-48h dev-cluster
+  # observation between each flip — see the priority table in
+  # ``docs/wiring_session_2026-05-07.md`` Этап 1.
+  # ──────────────────────────────────────────────────────────────────
+  # Step 1 (2026-05-08) — alias ``app.state.memory_system`` to the
+  # cognitive memory built by ``api_server/bootstrap/memory.py``.
+  # Wiring-only flip: no new I/O, no new latency, no new LLM trafic.
+  # Lets the ConversationService FastAPI dependency see a real
+  # MemorySystem instance — but the actual retrieval call stays
+  # gated by BRAIN_MEMORY_RETRIEVAL_ENABLED below (default off), so
+  # ``_load_memory_context`` short-circuits and ``state.memory_facts``
+  # stays empty exactly like pre-Task-3.  Safe baseline.
+  BRAIN_MEMORY_INJECT_ENABLED: "1"
+  # Step 2 (2026-05-08) — actually populate ``state.memory_facts``.
+  # ``ConversationService._load_memory_context`` now consults
+  # ``MemorySystem.semantic.search`` between ``_append_pm_facts``
+  # and ``_classify``.  Multi-tenancy filter (``customer_id`` +
+  # ``property_id``) is built from the request and passed to Qdrant
+  # so one customer's facts cannot leak into another's conversation.
+  # Sprint A reranker stays gated by its own flag below — without
+  # it the bi-encoder ranking reaches the state verbatim, no extra
+  # 568 MB pod RAM, no extra p95 latency budget burned.
+  # Expected impact: +~50 ms per conversation turn from the dense
+  # Qdrant query.  ``[ESTABLISHED FACTS]`` block in the assembled
+  # context starts containing the top-K bi-encoder hits.
+  BRAIN_MEMORY_RETRIEVAL_ENABLED: "1"
+  # Unified recall (2026-06-09) — ``_load_memory_context`` assembles
+  # the guest-facing recall directly from the property-scoped tiers
+  # (temporal knowledge graph facts/beliefs + a ``property_id``-scoped
+  # semantic search) instead of the legacy single semantic search that
+  # required a ``customer_id`` the fan-out never writes (so it always
+  # returned nothing).  Dated KG facts let the agent recall what a
+  # guest shared earlier ("From an earlier interaction (2026-06-07):
+  # …").  Property-scoped reads only — no cross-listing leak; bounded
+  # by a 4 s timeout and fail-open.  Toggle, default off in code.
+  BRAIN_UNIFIED_RECALL_ENABLED: "1"
+  # Sprint H — per-scenario PMS-feature whitelist for the
+  # ConditionSynthesizer.  Activates the hand-curated subset in
+  # ``brain_engine.patterns.scenario_features.SCENARIO_FEATURES``
+  # so timing-and-occupancy scenarios (access_code_release,
+  # late_checkout, early_checkin) stop mining ``currency``,
+  # ``total_price``, ``source`` and ``status`` as conditions.
+  # Closes Mümin's 2026-05-08 round-3 screenshot: late_checkout
+  # rule on 323133 had ``source eq 'bookingcom'`` AND
+  # ``total_price gte 23.58`` baked in, so any non-bookingcom or
+  # negative-price reservation silently failed condition matching
+  # — PM read this as "rule sometimes fires, sometimes doesn't".
+  # Pure mining-time restriction; runtime evaluation unchanged.
+  # Scenarios not listed in SCENARIO_FEATURES still use the global
+  # feature surface, so the flip cannot regress unrelated rules.
+  BRAIN_SCENARIO_FEATURES_ENABLED: "1"
+  # Foundation Layer Phase 2 — Step 1 (2026-05-14).  Sprint 6 W1
+  # (PR #279 to main, PR #281 to dev) wired the FL-16
+  # FoundationAnalysisOrchestrator into ConversationService.  Until
+  # this flag is on the orchestrator stays dormant: the wiring is
+  # in code but never invoked, the dev hot path is bit-for-bit
+  # pre-W1.  Flipping it activates *observation-only* behaviour:
+  # every guest message produces an AnalysisResult attached to
+  # ``state.foundation_analysis`` (foundation match, memory routes,
+  # provenance trail, guardrail block flag).  No downstream
+  # behaviour changes yet — the consumer flags
+  # ``BRAIN_FOUNDATION_GUARDRAIL_ENABLED`` (W3 enforcement) and
+  # ``BRAIN_FOUNDATION_LEARN_GATE_ENABLED`` (W4 mining gate) stay
+  # off in this PR and flip in Phase 2 Step 2 / Step 3 after 24-48h
+  # of clean Step 1 metrics.  Orchestrator exceptions are swallowed
+  # at WARNING in ``_run_foundation_analysis`` so a flaky matcher
+  # cannot break a guest reply.  Watch the
+  # ``Foundation analysis completed: …`` INFO log to confirm the
+  # matcher fires on real traffic.
+  BRAIN_FOUNDATION_ORCHESTRATOR_ENABLED: "1"
+  # Step 3+ — keep commented until the previous step has 24-48h of
+  # clean dev-cluster metrics.  Each line is owned by a separate
+  # PR so rollback is one-flag rollback (revert PR + redeploy).
+  #
+  # BRAIN_KG_DETERMINISTIC_SYNC_ENABLED: "1"
+  #   Task 7 — nightly KG sync uses structured DecisionCases
+  #   instead of gpt-4o-mini.  Saves nightly token spend.
+  #
+  # BRAIN_EPISODIC_DEDUP_ENABLED: "1"
+  #   PR 181 — fold near-duplicate episodes in nightly step 1.
+  #
+  # BRAIN_CONTRADICTION_CHECK_ENABLED: "1"
+  #   PR 182 — contradiction filter between Mem0 and FactStore.
+  #
+  # BRAIN_GOLDEN_CASES_ENABLED: "1"
+  #   Task 6 / PR 179 — LLM-judge step 8.  Requires migration
+  #   ``infra/postgres-init/025_evaluation_results.sql`` applied
+  #   first.  Adds ~$5-10/day Azure OpenAI spend.
+  #
+  # BRAIN_VOICE_PROCESSOR_ENABLED: "1"
+  #   PR 184 — inbound voice messages via Whisper.
+  #
+  # BRAIN_MEM0_EXTRACTOR_ENABLED: "1"
+  #   PR 183 — batch fact extraction in nightly step 1.
+  #
+  # BRAIN_RERANKER_ENABLED: "1"
+  #   Sprint A — cross-encoder reranker on top of bi-encoder.
+  #   Adds 568 MB pod RAM and 150-400 ms p95 — flip last.
+  #
+  # BRAIN_HYBRID_RETRIEVAL_ENABLED: "1"
+  #   DO NOT FLIP until Qdrant collections are migrated to carry
+  #   the BM25 sparse-vector named-config (separate ticket).
+
+  # ── Phase 3: per-request tenant auto-resolution ─────────────────
+  # When enabled, TenantResolverMiddleware extracts ``property_id``
+  # from each request and resolves the
+  # ``(customer_id, org_id, provider_type)`` triplet via the
+  # ``property_tenant_registry`` table (migration
+  # ``infra/postgres-init/032_property_tenant_registry.sql``).
+  # Downstream loaders (archive loader, unified-data readers,
+  # profile harvester) consult the resolved
+  # :class:`TenantContext` instead of the constructor-baked env
+  # defaults so a single pod can serve every tenant — closes the
+  # Sandbox UI auto-resolve gap and unlocks production scale
+  # (1M+ properties × 100k customers × 20 providers).
+  #
+  # Defaults are off so the legacy single-tenant pod path stays
+  # byte-for-byte identical to the pre-PR-#332 behaviour:
+  #   * TENANT_RESOLVER_ENABLED defaults to "false" — middleware
+  #     stays a no-op pass-through.
+  #   * TENANT_REGISTRY_BACKEND defaults to "memory" — Postgres
+  #     pool is only opened when explicitly set to "postgres".
+  #   * TENANT_REGISTRY_DATABASE_URL falls back to DATABASE_URL.
+  #
+  # Phase 1 (PR #331) body override semantics continue to win over
+  # the registry, so operators that already pass ``customer_id``
+  # in the bootstrap body keep working exactly as before.
+  TENANT_RESOLVER_ENABLED: "true"
+  TENANT_REGISTRY_BACKEND: "postgres"
+
+  # ── Stage 1: property_state SSoT (PR-C / PR #341) ───────────────
+  # Activates the single-source-of-truth status machine. When on,
+  # _build_registry opens a PostgresPropertyStateStore on the SAME
+  # asyncpg pool as the tenant registry, AutoBootstrapTrigger routes
+  # maybe_fire through request_bootstrap (cold -> queued -> warming
+  # -> primed with three-layer dedup), and the lightweight enqueue
+  # endpoint POST /api/v1/onboarding/request-bootstrap/property/{id}
+  # goes live.
+  #
+  # Default off: with this unset the trigger keeps its legacy
+  # asyncio.create_task path and the endpoint answers 503, so the pod
+  # behaves byte-for-byte as before PR #341.
+  #
+  # Prerequisite: migration 034 (the property_state table) must be
+  # applied on cendra-pg — CD does not auto-run migrations.
+  PROPERTY_STATE_ENABLED: "true"
+
+  # ── Phase 4: auto-bootstrap on first property touch ─────────────
+  # When enabled, the Phase 3 TenantResolverMiddleware also fires
+  # an :class:`AutoBootstrapTrigger` after each successful tenant
+  # resolution.  The trigger checks (in order):
+  #
+  #   1. property_id already in the in-process pending set → skip
+  #   2. PropertyProfile already exists in the store      → skip
+  #   3. tenant resolved via env_default fallback         → skip
+  #
+  # Otherwise it schedules a background ``bootstrap_fast`` task so
+  # the property is fully primed (conversations + cases + patterns
+  # + profile) within ~30-60 s of the first request.  The active
+  # request itself goes through immediately with whatever data
+  # exists — fire-and-forget, never blocks the response.
+  #
+  # Closes the "Sandbox UI switch to new property" gap: previously
+  # the operator had to call ``/bootstrap/property/{id}`` manually
+  # before the brain had any history for a fresh listing.
+  #
+  # Defaults are off so deployments that prefer the explicit
+  # bootstrap path keep working unchanged:
+  #   * AUTO_BOOTSTRAP_ENABLED defaults to "false".
+  #   * AUTO_BOOTSTRAP_DAYS defaults to 30 (the bootstrap_fast
+  #     cold-start window — 4-6x smaller than the legacy
+  #     180-day default to keep the background task bounded).
+  #   * AUTO_BOOTSTRAP_LIMIT is reserved for future per-property
+  #     cap wiring; read for forward compatibility only.
+  AUTO_BOOTSTRAP_ENABLED: "true"
+  # Pull the full available history (≈2 years) so the property
+  # is genuinely primed after the first touch — not just the
+  # most recent 30 days.  Even if bootstrap_fast takes 10-20
+  # minutes for a large dataset, the request itself returns
+  # immediately (fire-and-forget); the slow path only blocks
+  # the background asyncio task.
+  AUTO_BOOTSTRAP_DAYS: "730"
+  # Cooldown protects against eternal re-fire for properties
+  # whose unified-data GraphQL detail is missing (the
+  # harvester skips profile creation → profile-based dedup
+  # cannot help → without a cooldown the trigger would fire
+  # on every subsequent request).  See migration 033.
+  AUTO_BOOTSTRAP_COOLDOWN_HOURS: "1"
+
+  # ── Stage 2: out-of-process bootstrap queue ─────────────────────
+  # Switches the shared BootstrapDispatcher from the in-process
+  # asyncio task (Stage 1) to the Service Bus producer: every
+  # request_bootstrap (Phase 4 trigger + the request-bootstrap
+  # endpoint) serialises a BootstrapIntentMessage onto the
+  # ``bootstrap-intents`` queue instead of running bootstrap_fast on
+  # the serving event loop. The out-of-process worker
+  # (deploy/bootstrap-worker-deployment.yaml) drains the queue and
+  # runs the heavy pipeline, so a burst of cold properties can no
+  # longer starve the API and a pod restart no longer loses work.
+  #
+  # Requires (all satisfied on dev 2026-05-29): the queue exists with
+  # duplicate-detection + dead-lettering, AZURE_SERVICEBUS_CONNECTION_STRING
+  # is set (above), and the worker Deployment is running. If the flag
+  # is on but the connection string is missing, the dispatcher safely
+  # falls back to the in-process asyncio path rather than crashing.
+  BOOTSTRAP_QUEUE_ENABLED: "true"
+
+  # ── Phase 5: lazy probe for unknown properties ──────────────────
+  # When the Sandbox UI picks a property the registry has never
+  # seen, the Phase 3 resolver would otherwise fall through to the
+  # pod env_default — wrong customer for any cross-tenant pick.
+  # Enabling the lazy probe makes the resolver iterate every
+  # ``customer_id`` known to ``property_tenant_registry`` (plus the
+  # pod env default) and run a single ``conversations(customerId=X,
+  # propertyChannelId=Y, limit=1)`` GraphQL probe per candidate.
+  # The first hit yields the full ``(customer_id, provider_type)``
+  # triplet (the ``conversations`` query includes ``providerType``
+  # in the row payload — the ``properties`` list query does not).
+  #
+  # Hits are upserted into the registry with ``source='lazy'`` so
+  # the next request resolves via the cheap path.  Misses are
+  # cached in-process for ``TENANT_LAZY_PROBE_NEGATIVE_CACHE_MIN``
+  # minutes so the same unknown property does not trigger
+  # N×customers worth of GraphQL traffic on every hit.
+  TENANT_LAZY_PROBE_ENABLED: "true"
+  TENANT_LAZY_PROBE_NEGATIVE_CACHE_MIN: "10"
+
+  # ── Phase 3: temporal analysis endpoint (read-only) ─────────────
+  # Gates POST /api/v1/temporal/analyze
+  # (brain_engine/api/temporal_analysis_endpoints.py). Read on every
+  # call so it flips without a pod restart. On ⇒ the endpoint
+  # assembles the client's as-of timeline (Phase 1/2) and runs the
+  # LLM analyzer (Phase 3); off ⇒ the route 404s with
+  # ``temporal_analysis_disabled``.
+  BRAIN_TEMPORAL_ANALYSIS_ENABLED: "true"
+
+  # ── Phase 3: temporal analysis in PM Chat (insight channel) ─────
+  # Gates the conversation-pipeline hook
+  # (brain_engine/conversation/temporal_pm_hook.py). On ⇒ after Brain
+  # answers a guest, it analyses the client's past+present and emits a
+  # TEMPORAL_ANALYSIS event to PM Chat. Read on every call (no pod
+  # bounce). NOTE: fires per guest turn → one LLM analysis + one PM
+  # Chat event each turn (cost + noise); smarter triggering is a
+  # follow-up. Enabled on dev for end-to-end verification only.
+  BRAIN_TEMPORAL_PM_ENABLED: "true"
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "2Gi"
+  limits:
+    memory: "4Gi"
+
+readinessProbe:
+  enabled: false
+
+livenessProbe:
+  enabled: false
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+imagePullSecrets:
+  - name: acr-secret
+
+updateStrategy: {}
+
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 2
+  cpuTarget: 70
+  memoryTarget: 80
+
+ingress:
+  enabled: true
+  ingressClassName: "webapprouting.kubernetes.azure.com"
+  name: "brain-engine"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    ingress.kubernetes.io/ssl-redirect: "true"
+    # The default nginx proxy timeout is 60s.  A single guest turn runs
+    # several sequential LLM calls (classifier + foundation analysis +
+    # ReAct agent + guardrail); on a cold pod or a property without a
+    # cached profile (agent falls back to tool loops) the turn can exceed
+    # 60s, so nginx returned 504 before the pipeline finished.  Raise the
+    # read/send timeout to 180s — comfortably above the worst observed
+    # turn, while litellm's own per-call timeout (PR #375, 30s) still
+    # bounds any single hung model call.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+  rules:
+    - host: brain-engine-dev.botel.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            serviceName: brain-engine
+            servicePort: 80
+  tls:
+    - hosts:
+        - brain-engine-dev.botel.ai
+      secretName: brain-engine-tls

@@ -1,0 +1,1795 @@
+# ══════════════════════════════════════════════════════════════════════
+# cendra-pg migrations — initial schema for Brain Engine
+# ══════════════════════════════════════════════════════════════════════
+# Creates the 7 core tables used by Brain Engine:
+#   - decision_cases    — DecisionCase primary store (scenario + decision)
+#   - pattern_rules     — PatternRule extracted rules (Wilson confidence)
+#   - zfs_blocks        — BrainZFS content-addressed block storage
+#   - zfs_pointers      — BrainZFS dataset path → block mapping
+#   - zfs_snapshots     — BrainZFS point-in-time snapshots
+#   - guest_memories    — per-guest long-term memory (migrates from Redis)
+#   - interactions      — long-term interaction log (replaces 90d TTL)
+#
+# Pattern: k8s Job with psql runs exactly once after cluster is Ready.
+# Idempotent — every CREATE uses IF NOT EXISTS, so re-runs are safe.
+#
+# Apply after deploy/postgres-cluster.yaml and after the Cluster reports
+# `Cluster in healthy state`:
+#   kubectl apply -f deploy/postgres-migrations.yaml -n dev
+# ══════════════════════════════════════════════════════════════════════
+
+---
+# ConfigMap holding the migration SQL. Keeping it in a CM (not inline in
+# the Job) lets us iterate on the schema by editing the CM + bumping the
+# Job generation, without touching the Job container image.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  001_init.sql: |
+    -- ════════════════════════════════════════════════════════════
+    -- Brain Engine initial schema (migration 001)
+    -- ════════════════════════════════════════════════════════════
+    -- Runs as the brain_engine owner on the brain_engine database.
+    -- Extensions (vector, pg_trgm, uuid-ossp) are installed by the
+    -- Cluster bootstrap block and assumed present.
+
+    -- ---------------------------------------------------------
+    -- DECISION_CASES — canonical record of every agent decision.
+    -- Structured truth; all learning derives from this table.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS decision_cases (
+        id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+        case_id TEXT UNIQUE NOT NULL,
+
+        stage TEXT NOT NULL,
+        scenario TEXT NOT NULL,
+        decision_type TEXT NOT NULL,
+
+        property_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        reservation_id TEXT,
+        guest_id TEXT,
+
+        message_text TEXT DEFAULT '',
+        message_language TEXT DEFAULT 'en',
+        response_text TEXT DEFAULT '',
+        extracted_entities JSONB DEFAULT '{}'::jsonb,
+
+        pms_snapshot JSONB DEFAULT '{}'::jsonb,
+        calendar_snapshot JSONB DEFAULT '{}'::jsonb,
+        ops_snapshot JSONB DEFAULT '{}'::jsonb,
+        guest_snapshot JSONB DEFAULT '{}'::jsonb,
+
+        decision JSONB NOT NULL,
+        executed_actions TEXT[] DEFAULT '{}',
+        outcome JSONB DEFAULT '{}'::jsonb,
+
+        evidence_source_ids TEXT[] DEFAULT '{}',
+
+        message_embedding vector(1536),
+        context_embedding vector(1536),
+
+        search_doc tsvector GENERATED ALWAYS AS (
+            to_tsvector('simple',
+                coalesce(message_text, '') || ' ' ||
+                coalesce(response_text, '') || ' ' ||
+                coalesce(decision->>'reasoning', '')
+            )
+        ) STORED,
+
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dc_scope
+        ON decision_cases (owner_id, property_id, scenario, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dc_stage
+        ON decision_cases (stage, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dc_reservation
+        ON decision_cases (reservation_id) WHERE reservation_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_dc_guest
+        ON decision_cases (guest_id) WHERE guest_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_dc_fts
+        ON decision_cases USING GIN (search_doc);
+    CREATE INDEX IF NOT EXISTS idx_dc_created
+        ON decision_cases (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dc_msg_embedding
+        ON decision_cases USING hnsw (message_embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64);
+    CREATE INDEX IF NOT EXISTS idx_dc_ctx_embedding
+        ON decision_cases USING hnsw (context_embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64);
+
+    -- ---------------------------------------------------------
+    -- PATTERN_RULES — learned rules extracted from DecisionCases.
+    -- Wilson lower bound applied in extractor.py.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS pattern_rules (
+        id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+        pattern_id TEXT UNIQUE NOT NULL,
+
+        scenario TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        scope_id TEXT NOT NULL,
+
+        conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+        action JSONB NOT NULL,
+        blocker_types TEXT[] DEFAULT '{}',
+
+        support_count INTEGER DEFAULT 0,
+        counterexample_count INTEGER DEFAULT 0,
+        confidence NUMERIC(5,4) DEFAULT 0.0,
+
+        risk_level TEXT DEFAULT 'medium',
+        execution_mode TEXT DEFAULT 'ask',
+
+        valid_from TIMESTAMPTZ DEFAULT now(),
+        valid_to TIMESTAMPTZ,
+        superseded_by UUID REFERENCES pattern_rules(id),
+
+        source_case_ids TEXT[] DEFAULT '{}',
+
+        active BOOLEAN DEFAULT true,
+        last_seen_at TIMESTAMPTZ DEFAULT now(),
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pr_active
+        ON pattern_rules (scenario, scope, scope_id)
+        WHERE active = true AND valid_to IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_pr_confidence
+        ON pattern_rules (confidence DESC) WHERE active = true;
+
+    -- ---------------------------------------------------------
+    -- ZFS_BLOCKS / ZFS_POINTERS / ZFS_SNAPSHOTS
+    -- Content-addressed storage for BrainZFS (conversation archive,
+    -- dedup of property-level repeated context).
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS zfs_blocks (
+        block_hash TEXT PRIMARY KEY,
+        data BYTEA NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        ref_count INTEGER DEFAULT 1,
+        compressed BOOLEAN DEFAULT false,
+        compression_algo TEXT DEFAULT 'none',
+        created_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS zfs_pointers (
+        dataset TEXT NOT NULL,
+        path TEXT NOT NULL,
+        block_hash TEXT NOT NULL REFERENCES zfs_blocks(block_hash),
+        version INTEGER NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        PRIMARY KEY (dataset, path, version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_zp_current
+        ON zfs_pointers (dataset, path, version DESC);
+
+    CREATE TABLE IF NOT EXISTS zfs_snapshots (
+        name TEXT PRIMARY KEY,
+        dataset TEXT NOT NULL,
+        pointer_table JSONB NOT NULL,
+        pointer_count INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    -- ---------------------------------------------------------
+    -- GUEST_MEMORIES — per-guest durable memory.
+    -- Migrates from Redis (currently ephemeral with TTL).
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS guest_memories (
+        guest_id TEXT PRIMARY KEY,
+        total_stays INTEGER DEFAULT 0,
+        total_interactions INTEGER DEFAULT 0,
+        language TEXT DEFAULT '',
+        communication_style TEXT DEFAULT '',
+        avg_satisfaction NUMERIC(3,2) DEFAULT 0.0,
+        satisfaction_scores JSONB DEFAULT '[]'::jsonb,
+        preferences JSONB DEFAULT '{}'::jsonb,
+        common_requests JSONB DEFAULT '[]'::jsonb,
+        incidents JSONB DEFAULT '[]'::jsonb,
+        risk_flags JSONB DEFAULT '[]'::jsonb,
+        patterns JSONB DEFAULT '[]'::jsonb,
+        property_history JSONB DEFAULT '[]'::jsonb,
+        notes JSONB DEFAULT '[]'::jsonb,
+        first_seen TIMESTAMPTZ DEFAULT now(),
+        last_seen TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_gm_risk
+        ON guest_memories USING GIN (risk_flags);
+    CREATE INDEX IF NOT EXISTS idx_gm_last_seen
+        ON guest_memories (last_seen DESC);
+
+    -- ---------------------------------------------------------
+    -- INTERACTIONS — long-term interaction log.
+    -- Replaces the 90-day Redis TTL for seasonal pattern learning.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS interactions (
+        id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+        interaction_id TEXT UNIQUE NOT NULL,
+        event_type TEXT NOT NULL,
+        property_id TEXT,
+        owner_id TEXT,
+
+        input_message TEXT DEFAULT '',
+        output_response TEXT DEFAULT '',
+        output_actions JSONB DEFAULT '[]'::jsonb,
+
+        confidence NUMERIC(4,3),
+        cognitive_level TEXT,
+        grader_score NUMERIC(4,3),
+
+        owner_approved BOOLEAN,
+        owner_intervened BOOLEAN DEFAULT false,
+        guest_satisfied BOOLEAN,
+
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ix_type
+        ON interactions (event_type, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ix_property
+        ON interactions (property_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ix_created
+        ON interactions (created_at DESC);
+
+---
+# Job runs psql against cendra-pg-rw using the app credentials from
+# the CNPG-managed secret cendra-pg-app. Idempotent via IF NOT EXISTS.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-001
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800  # clean up Job object after 7 days
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 001_init.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/001_init.sql
+              echo "Verifying tables..."
+              psql "$DATABASE_URL" -c "\dt"
+              echo "Verifying extensions..."
+              psql "$DATABASE_URL" -c "SELECT extname, extversion FROM pg_extension ORDER BY extname;"
+              echo "Migration complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 002 — blockers table (persistent BlockerStore).
+# ══════════════════════════════════════════════════════════════════════
+# Adds a durable replacement for the in-memory BlockerStore used by
+# BlockerEngine.  Keeping the migration in a separate ConfigMap + Job
+# pair means the 001 Job stays exactly as it already was applied on
+# cluster; re-running 002 is idempotent thanks to IF NOT EXISTS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-002
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  002_blockers.sql: |
+    -- ---------------------------------------------------------
+    -- BLOCKERS — preconditions that hold sensitive actions.
+    -- Replaces the in-memory reference store; survives restarts.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS blockers (
+        blocker_id TEXT PRIMARY KEY,
+        blocker_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        property_id TEXT NOT NULL,
+        reservation_id TEXT,
+        description TEXT NOT NULL DEFAULT '',
+        blocks_actions TEXT[] DEFAULT '{}',
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        resolved_at TIMESTAMPTZ,
+        resolved_by TEXT
+    );
+
+    -- Hot path: BlockerEngine.check_blockers / has_hard_blocker.
+    -- Partial index keeps it small and fast even on a long table.
+    CREATE INDEX IF NOT EXISTS idx_blockers_active_by_property
+        ON blockers (property_id)
+        WHERE resolved_at IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_blockers_active_by_reservation
+        ON blockers (property_id, reservation_id)
+        WHERE resolved_at IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_blockers_created
+        ON blockers (created_at DESC);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-002
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 002_blockers.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/002_blockers.sql
+              echo "Verifying blockers table..."
+              psql "$DATABASE_URL" -c "\d blockers"
+              echo "Migration 002 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-002
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 003 — workflow_autonomy table (per-workflow autonomy gating).
+# ══════════════════════════════════════════════════════════════════════
+# Persistent store for AutonomyEngine / PgAutonomyStore.  Replaces the
+# in-memory reference store so per-workflow OBSERVE | SEMI_AUTO |
+# AUTOPILOT progression survives api-server restarts.  Key is the
+# composite (property_id, workflow); ON CONFLICT upsert keeps the SQL
+# path identical for the first write and every subsequent transition.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-003
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  003_workflow_autonomy.sql: |
+    -- ---------------------------------------------------------
+    -- WORKFLOW_AUTONOMY — per-(property, workflow) state machine.
+    -- One row per (property_id, workflow); upserted by the engine
+    -- on every metrics update or PM-forced transition.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS workflow_autonomy (
+        property_id TEXT NOT NULL,
+        workflow TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'observe',
+        sample_size INTEGER NOT NULL DEFAULT 0,
+        success_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+        override_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+        incidents INTEGER NOT NULL DEFAULT 0,
+        mean_latency_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+        hold_seconds INTEGER NOT NULL DEFAULT 60,
+        changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        changed_by TEXT NOT NULL DEFAULT 'system',
+        reason TEXT NOT NULL DEFAULT 'initialized',
+        PRIMARY KEY (property_id, workflow)
+    );
+
+    -- Trust Meter endpoint reads every workflow for a property at
+    -- once; the partial-free index keeps the lookup ~O(workflows).
+    CREATE INDEX IF NOT EXISTS idx_wf_autonomy_by_property
+        ON workflow_autonomy (property_id);
+
+    -- "Which properties hit AUTOPILOT this week?" / dashboard fan-out.
+    CREATE INDEX IF NOT EXISTS idx_wf_autonomy_state
+        ON workflow_autonomy (state, changed_at DESC);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-003
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 003_workflow_autonomy.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/003_workflow_autonomy.sql
+              echo "Verifying workflow_autonomy table..."
+              psql "$DATABASE_URL" -c "\d workflow_autonomy"
+              echo "Migration 003 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-003
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 004 — interview_answers table (PM interview answer store).
+# ══════════════════════════════════════════════════════════════════════
+# Persistent store for InterviewEngine / PgInterviewAnswerStore.
+# Replaces the in-memory reference store so PM answers survive
+# api-server restarts.  Composite PK (property_id, qid) — re-answering
+# the same question replaces the prior record (latest policy wins).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-004
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  004_interview_answers.sql: |
+    -- ---------------------------------------------------------
+    -- INTERVIEW_ANSWERS — PM responses to the proactive
+    -- interview catalog.  One row per (property_id, qid);
+    -- ON CONFLICT upsert keeps the SQL path identical for
+    -- the first capture and every re-answer.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS interview_answers (
+        property_id TEXT NOT NULL,
+        qid TEXT NOT NULL,
+        answer_text TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'text',
+        answered_by TEXT NOT NULL DEFAULT 'pm',
+        answered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (property_id, qid)
+    );
+
+    -- Coverage report fans out by property_id; stage filtering
+    -- happens in Python against the catalog, so a single index
+    -- is enough.
+    CREATE INDEX IF NOT EXISTS idx_ia_by_property
+        ON interview_answers (property_id, answered_at DESC);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-004
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 004_interview_answers.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/004_interview_answers.sql
+              echo "Verifying interview_answers table..."
+              psql "$DATABASE_URL" -c "\d interview_answers"
+              echo "Migration 004 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-004
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 005 — decision_cards table (proposed decision card store).
+# ══════════════════════════════════════════════════════════════════════
+# Persistent store for CardStore / PgCardStore.  Replaces the
+# InMemoryCardStore wired in api_server/server.py lifespan so that
+# confirmed / dismissed / expired cards survive api-server restarts.
+# The JSONB ``payload`` column holds the full DecisionCard value
+# object (context_tag / title / reasoning rows / prepared action /
+# trust_footer / autonomy_state) so the schema does not need to track
+# every card-body evolution.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-005
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  005_decision_cards.sql: |
+    -- ---------------------------------------------------------
+    -- DECISION_CARDS — proposed cards surfaced to the V2 UI.
+    -- One row per StoredCard; status transitions are in-place
+    -- updates so the card id remains stable across lifecycle.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS decision_cards (
+        card_id         TEXT        PRIMARY KEY,
+        property_id     TEXT        NOT NULL,
+        workflow        TEXT        NOT NULL,
+        status          TEXT        NOT NULL DEFAULT 'pending',
+        payload         JSONB       NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        resolved_at     TIMESTAMPTZ,
+        resolved_by     TEXT,
+        resolution_note TEXT,
+        CHECK (status IN ('pending','confirmed','dismissed','expired'))
+    );
+
+    -- Hot path: UI asks for cards per property, newest first.
+    CREATE INDEX IF NOT EXISTS idx_decision_cards_property_created
+        ON decision_cards (property_id, created_at DESC);
+
+    -- Partial index for the active-queue read (the most frequent
+    -- V2 UI call) so the planner avoids scanning resolved rows.
+    CREATE INDEX IF NOT EXISTS idx_decision_cards_pending
+        ON decision_cards (property_id, created_at DESC)
+        WHERE status = 'pending';
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-005
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 005_decision_cards.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/005_decision_cards.sql
+              echo "Verifying decision_cards table..."
+              psql "$DATABASE_URL" -c "\d decision_cards"
+              echo "Migration 005 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-005
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 010 — event_sequencer table (out-of-order event guard).
+# Numbered 010 (not 006) to avoid collision with reverted 006_pattern_class
+# / 007 / 008 / 009 ConfigMaps + Jobs that still exist in the dev cluster
+# from earlier work that was reverted in code but not in cluster state.
+# ══════════════════════════════════════════════════════════════════════
+# Persistent dedup + ordering ledger for the cascade-event consumer
+# that reads Mümin's Service Bus topics (botel-property-sync,
+# botel-reservation-sync, botel-conversation-sync, botel-guest-sync).
+# Service Bus may redeliver after DLQ retry and may reorder messages
+# under load; without a ledger Brain Engine would either duplicate
+# memory writes or silently overwrite fresh state with stale.
+#
+# Composite PK is (topic, entity_id) so each subject keeps its own
+# monotonic sequence.  ON CONFLICT DO UPDATE is gated on
+# `EXCLUDED.last_sequence > event_sequencer.last_sequence`, returning
+# the post-update row so the application can tell APPLY from
+# DUPLICATE / OUT_OF_ORDER from the same single round-trip.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-010
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  010_event_sequencer.sql: |
+    -- ---------------------------------------------------------
+    -- EVENT_SEQUENCER — last applied (sequence, event_id) per
+    -- (topic, entity_id).  Read+write hot-path is a single
+    -- INSERT ... ON CONFLICT DO UPDATE WHERE; one row per subject.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS event_sequencer (
+        topic           TEXT        NOT NULL,
+        entity_id       TEXT        NOT NULL,
+        last_sequence   BIGINT      NOT NULL,
+        last_event_id   TEXT        NOT NULL,
+        last_applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (topic, entity_id)
+    );
+
+    -- "Which subjects have been quiet for a while?" — used by the
+    -- DLQ-watch alert and by the cascade-consumer health probe.
+    CREATE INDEX IF NOT EXISTS idx_event_sequencer_recency
+        ON event_sequencer (last_applied_at DESC);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-010
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 010_event_sequencer.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/010_event_sequencer.sql
+              echo "Verifying event_sequencer table..."
+              psql "$DATABASE_URL" -c "\d event_sequencer"
+              echo "Migration 010 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-010
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 011 — unanswered_threads table (sandbox example replies).
+# ══════════════════════════════════════════════════════════════════════
+# Persistent store for ``UnansweredThreadStore`` / ``PgUnansweredThreadStore``.
+# Replaces the in-memory default wired in api_server/server.py so the
+# sandbox preview survives api-server restarts and the V1 onboarding
+# step 14 (past-conversation AI replay) keeps a durable record of every
+# generated example reply.  One row per ``conversation_id`` — the
+# upsert path is identical for the first capture and a re-generation
+# after the PM rejects the candidate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-011
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  011_unanswered_threads.sql: |
+    -- ---------------------------------------------------------
+    -- UNANSWERED_THREADS — one sandbox row per unanswered guest
+    -- conversation; ON CONFLICT (conversation_id) DO UPDATE
+    -- keeps the SQL path identical for first capture and the
+    -- re-harvest after the PM has reviewed the candidate.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS unanswered_threads (
+        conversation_id      TEXT        NOT NULL PRIMARY KEY,
+        property_id          TEXT        NOT NULL,
+        last_guest_message   TEXT        NOT NULL,
+        last_guest_sent_at   TIMESTAMPTZ NOT NULL,
+        example_reply        TEXT        NOT NULL,
+        generated_by         TEXT        NOT NULL,
+        language             TEXT        NOT NULL DEFAULT '',
+        generated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+        -- Comma-separated rule names from
+        -- ``brain_engine.sandbox.review_heuristics.classify_review_need``.
+        -- Empty string means the heuristic check found nothing
+        -- suspicious; the column stays empty for template-generated
+        -- rows and rows produced before the heuristic was wired.
+        needs_review_reason  TEXT        NOT NULL DEFAULT ''
+    );
+
+    -- Listing path orders by ``last_guest_sent_at DESC`` per property
+    -- so the UI surfaces the freshest unanswered thread first.
+    CREATE INDEX IF NOT EXISTS idx_unanswered_threads_by_property
+        ON unanswered_threads (property_id, last_guest_sent_at DESC);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-011
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 011_unanswered_threads.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/011_unanswered_threads.sql
+              echo "Verifying unanswered_threads table..."
+              psql "$DATABASE_URL" -c "\d unanswered_threads"
+              echo "Migration 011 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-011
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 012 — property_profiles
+# ══════════════════════════════════════════════════════════════════════
+# PG-backed persistence for ``PropertyProfile`` snapshots produced by
+# the onboarding bootstrap.  Replaces ``InMemoryPropertyProfileStore``,
+# whose contents disappear on every pod restart / autoscaler eviction
+# and force a fresh 7-minute bootstrap before the chat can answer
+# WiFi / parking / check-in questions.
+#
+# Schema is intentionally narrow: one row per ``propertyChannelId``,
+# the entire ``PropertyProfile`` is serialised into a single JSONB
+# ``payload`` column.  Hydration is performed in code by
+# :class:`PgPropertyProfileStore`, so the SQL surface stays
+# read/write-symmetrical (``ON CONFLICT DO UPDATE`` keeps the upsert
+# path identical to the initial insert).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-012
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  012_property_profiles.sql: |
+    -- ---------------------------------------------------------
+    -- PROPERTY_PROFILES — durable cache of the onboarding-built
+    -- ``PropertyProfile`` snapshot, keyed by ``propertyChannelId``.
+    -- One row per property; ``payload`` carries the full unified
+    -- static payload (WiFi, parking, amenities, descriptions, …)
+    -- plus the aggregate KnowledgeSection / ReviewAggregate blocks.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS property_profiles (
+        property_channel_id  TEXT         NOT NULL PRIMARY KEY,
+        payload              JSONB        NOT NULL,
+        built_at             TIMESTAMPTZ  NOT NULL,
+        updated_at           TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+
+    -- Listing path orders by ``built_at DESC`` so the UI surfaces the
+    -- freshest profile first; mirrors ``InMemoryPropertyProfileStore.
+    -- list_all`` ordering after a stable ascending sort upstream.
+    CREATE INDEX IF NOT EXISTS idx_property_profiles_built_at
+        ON property_profiles (built_at DESC);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-012
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 012_property_profiles.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/012_property_profiles.sql
+              echo "Verifying property_profiles table..."
+              psql "$DATABASE_URL" -c "\d property_profiles"
+              echo "Migration 012 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-012
+
+---
+# ─────────────────────────────────────────────────────────────────
+# Migration 013 — property_pm_facts
+# ─────────────────────────────────────────────────────────────────
+#
+# Durable store for manager-confirmed knowledge ("PM Chat" replies)
+# so the AI stops re-flagging the same gap on every guest message.
+# When a PM answers a sandbox / regenerate-pm-knowledge prompt the
+# new fact lands here, scoped per (customer, property), and the
+# next live-chat turn folds it into the system prompt through
+# ``ConversationService._load_property_knowledge`` (PgPmFactStore).
+#
+# Schema is intentionally narrow: free-text ``fact_text`` plus the
+# routing keys we need to look facts up.  Empty
+# ``property_channel_id`` ('') means "customer-wide" — used when
+# the PM Chat surface does not pass a property selection.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-013
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  013_property_pm_facts.sql: |
+    -- ---------------------------------------------------------
+    -- PROPERTY_PM_FACTS — manager-confirmed knowledge captured
+    -- when a PM replies through PM Chat (Sandbox v2) or the
+    -- regenerate-pm-knowledge endpoint.  Read by the live-chat
+    -- pipeline so the AI answers directly on the next guest turn
+    -- instead of repeating the BRAIN flag forever.
+    --
+    -- ``property_channel_id = ''`` means "customer-wide": the PM
+    -- Chat call did not carry a property selection, so the fact
+    -- applies to every property under the customer.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS property_pm_facts (
+        id                   BIGSERIAL    PRIMARY KEY,
+        customer_id          TEXT         NOT NULL,
+        org_id               TEXT         NOT NULL DEFAULT '',
+        property_channel_id  TEXT         NOT NULL DEFAULT '',
+        fact_text            TEXT         NOT NULL,
+        source_message_id    TEXT         NOT NULL DEFAULT '',
+        created_at           TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+
+    -- Idempotency on the natural key — replaying the same PM
+    -- correction must not bloat the prompt with duplicates.
+    -- The unique index is partial on ``length(fact_text) > 0``
+    -- so empty placeholder rows would never collide (they should
+    -- not be inserted in the first place, but defensive is cheap).
+    ALTER TABLE property_pm_facts
+        DROP CONSTRAINT IF EXISTS uq_property_pm_facts_natural_key;
+    ALTER TABLE property_pm_facts
+        ADD CONSTRAINT uq_property_pm_facts_natural_key
+        UNIQUE (customer_id, property_channel_id, fact_text);
+
+    -- Live-chat read path filters by (customer_id,
+    -- property_channel_id IN (target, '')) ORDER BY created_at —
+    -- the composite index covers it without a separate sort.
+    CREATE INDEX IF NOT EXISTS idx_property_pm_facts_lookup
+        ON property_pm_facts (
+            customer_id,
+            property_channel_id,
+            created_at
+        );
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-013
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 013_property_pm_facts.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/013_property_pm_facts.sql
+              echo "Verifying property_pm_facts table..."
+              psql "$DATABASE_URL" -c "\d property_pm_facts"
+              echo "Migration 013 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-013
+---
+# 014_owner_flexibility_profiles
+# OWNER_FLEXIBILITY_PROFILES — per-(owner, property) baseline that
+# the execution orchestrator consults as the "preference" tier in
+# the §10 priority chain (manual → blocker → safety → learned →
+# preference → ask).  Stored field-group-by-field-group as JSONB
+# so the harvester (graphql) and pm-correction writers can update
+# one cluster (e.g. fee_rules) without rewriting unrelated groups.
+# ``source_of_truth`` keeps provenance per field group; ``version``
+# is the monotonic counter writers compare-and-swap on to detect
+# concurrent updates.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-014
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  014_owner_flexibility_profiles.sql: |
+    -- ---------------------------------------------------------
+    -- OWNER_FLEXIBILITY_PROFILES — owner baseline used by
+    -- ExecutionOrchestrator as the "preference" tier before
+    -- falling through to "ask".  Composite primary key
+    -- (owner_id, property_id) lets one owner carry distinct
+    -- profiles across the portfolio.
+    --
+    -- JSONB columns hold field groups so the harvester and the
+    -- pm-correction writer can update one cluster (e.g.
+    -- ``fee_rules``) without rewriting unrelated groups.
+    -- ``source_of_truth`` records the most recent writer per
+    -- field group: ``graphql`` (harvested), ``pm_correction``
+    -- (sandbox / regenerate), ``owner_directive`` (explicit).
+    --
+    -- ``version`` is a monotonic counter writers CAS on to
+    -- detect conflicting concurrent updates.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS owner_flexibility_profiles (
+        owner_id              TEXT         NOT NULL,
+        property_id           TEXT         NOT NULL,
+        tenant_id             TEXT         NOT NULL DEFAULT '',
+        occupancy_capacity    JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        fee_rules             JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        stay_rules            JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        checkin_rules         JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        amenity_exceptions    JSONB        NOT NULL DEFAULT '[]'::jsonb,
+        flexibility           JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        approval_thresholds   JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        source_of_truth       JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        version               BIGINT       NOT NULL DEFAULT 1,
+        updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        PRIMARY KEY (owner_id, property_id)
+    );
+
+    -- Tenant-scoped listings (one tenant sweeping every owner
+    -- baseline) bypass the natural PK, so a secondary index keeps
+    -- that read off a sequential scan.
+    CREATE INDEX IF NOT EXISTS idx_owner_flex_tenant_owner
+        ON owner_flexibility_profiles (tenant_id, owner_id);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-014
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 014_owner_flexibility_profiles.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/014_owner_flexibility_profiles.sql
+              echo "Verifying owner_flexibility_profiles table..."
+              psql "$DATABASE_URL" -c "\d owner_flexibility_profiles"
+              echo "Migration 014 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-014
+
+---
+# 015_orchestrator_verdict
+# Adds the JSONB ``orchestrator_verdict`` column to ``decision_cases``
+# so the §10 priority-chain verdict (tier + action + mode + rationale +
+# params) is persisted alongside every logged DecisionCase.  Pattern
+# miners read this to attribute outcomes to the tier that fired —
+# without it, ``human_overrode`` cannot be tied back to the rule the
+# orchestrator emitted, which is the signal that distinguishes "PM
+# disagreed with the engine" from "PM clarified the engine".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-015
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  015_orchestrator_verdict.sql: |
+    -- ---------------------------------------------------------
+    -- Branch 4: capture the §10 priority-chain verdict on every
+    -- DecisionCase so pattern miners can attribute outcomes to
+    -- the tier that fired (manual / blocker / safety / learned /
+    -- preference / ask).  Existing rows backfill to ``{}`` —
+    -- legacy cases stay learnable, just without tier attribution.
+    -- ---------------------------------------------------------
+    ALTER TABLE decision_cases
+        ADD COLUMN IF NOT EXISTS orchestrator_verdict JSONB
+        NOT NULL DEFAULT '{}'::jsonb;
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-015
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 015_orchestrator_verdict.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/015_orchestrator_verdict.sql
+              echo "Verifying decision_cases.orchestrator_verdict column..."
+              psql "$DATABASE_URL" -c "\d decision_cases" | grep orchestrator_verdict
+              echo "Migration 015 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-015
+
+---
+# 020_ab_experiments
+# A/B EXPERIMENT PERSISTENCE — durable storage for the registry that
+# previously lived only in process memory.  Two tables:
+#
+#   * ``ab_experiments`` — one row per registered experiment, holding
+#     the variant matrix, salt, alpha, control id and lifecycle
+#     timestamps.  ``status`` lets the runtime fence
+#     ``record_outcome`` writes to running experiments only.
+#
+#   * ``ab_outcomes`` — append-only ledger of recorded outcomes.  We
+#     intentionally avoid pre-aggregation: the verdict pipeline
+#     re-reduces ``trials`` / ``successes`` per variant on demand,
+#     which keeps the schema honest for late-arriving outcomes and
+#     for replays.
+#
+# The advisory doc (§Stage 4 — A/B framework) requires the registry
+# to survive process restarts so verdicts can mature across pod
+# rollouts.  Without this table, the in-memory tally resets on every
+# deploy and the ``min_trials_per_arm`` floor is never reached.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-020
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  020_ab_experiments.sql: |
+    -- ---------------------------------------------------------
+    -- AB_EXPERIMENTS — registry rows for every experiment the
+    -- engine has registered.  ``variants`` is a JSONB array of
+    -- ``{variant_id, weight, is_control}`` objects so adding a
+    -- new field (e.g. ``description``) does not need a schema
+    -- migration.  ``salt`` is what the deterministic traffic
+    -- splitter hashes against; ``alpha`` and ``min_trials_per_arm``
+    -- are the verdict thresholds; ``control_id`` is denormalised
+    -- so the verdict reader does not have to scan ``variants``.
+    --
+    -- ``status`` is one of: ``running``, ``stopped``, ``archived``.
+    -- ``ended_at`` is set when the runtime stops the experiment;
+    -- ``created_at`` is the original registration timestamp.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS ab_experiments (
+        experiment_id        TEXT         PRIMARY KEY,
+        name                 TEXT         NOT NULL DEFAULT '',
+        hypothesis           TEXT         NOT NULL DEFAULT '',
+        variants             JSONB        NOT NULL,
+        salt                 TEXT         NOT NULL DEFAULT '',
+        alpha                DOUBLE PRECISION NOT NULL DEFAULT 0.05,
+        min_trials_per_arm   INTEGER      NOT NULL DEFAULT 50,
+        control_id           TEXT         NOT NULL,
+        status               TEXT         NOT NULL DEFAULT 'running',
+        created_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        ended_at             TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ab_experiments_status
+        ON ab_experiments (status, created_at DESC);
+
+    -- ---------------------------------------------------------
+    -- AB_OUTCOMES — append-only ledger.  Every call to
+    -- ``ExperimentRegistry.record_outcome`` writes one row.  The
+    -- verdict pipeline re-aggregates per (experiment_id,
+    -- variant_id) at read time so out-of-order or replayed
+    -- outcomes converge to the same verdict without needing an
+    -- update path on a cached counter.
+    --
+    -- ``metadata`` carries optional context (e.g. subject id,
+    -- decision case id) so analysts can drill from a verdict
+    -- back to the originating decision.
+    -- ---------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS ab_outcomes (
+        id              BIGSERIAL    PRIMARY KEY,
+        experiment_id   TEXT         NOT NULL
+            REFERENCES ab_experiments (experiment_id)
+            ON DELETE CASCADE,
+        variant_id      TEXT         NOT NULL,
+        success         BOOLEAN      NOT NULL,
+        metadata        JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        recorded_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+
+    -- Verdict reads aggregate by (experiment_id, variant_id);
+    -- this index keeps that path on a bitmap-index scan rather
+    -- than a sequential scan once the ledger grows.
+    CREATE INDEX IF NOT EXISTS idx_ab_outcomes_experiment_variant
+        ON ab_outcomes (experiment_id, variant_id);
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-020
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 020_ab_experiments.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/020_ab_experiments.sql
+              echo "Verifying ab_experiments / ab_outcomes tables..."
+              psql "$DATABASE_URL" -c "\d ab_experiments"
+              psql "$DATABASE_URL" -c "\d ab_outcomes"
+              echo "Migration 020 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-020
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 021 — bi-temporal soft-invalidate on pattern_rules.
+# ══════════════════════════════════════════════════════════════════════
+# Adds invalid_at + deactivated_at columns so the resolver in
+# brain_engine/patterns/pattern_miner.py:_resolve_pattern_rule_contradictions
+# can soft-invalidate older rules when a newer rule supersedes them
+# without losing the historical row (Sprint 1 — Graphiti port,
+# arXiv 2501.13956 §3.2).  Pure ADD COLUMN + indexes; rollback is
+# a column drop.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-021
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  021_pattern_rule_bitemporal.sql: |
+    BEGIN;
+
+    ALTER TABLE pattern_rules
+        ADD COLUMN IF NOT EXISTS invalid_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ;
+
+    -- Backfill: deactivated rows get deactivated_at = updated_at so
+    -- audit queries still locate the moment of deactivation.
+    UPDATE pattern_rules
+    SET deactivated_at = updated_at
+    WHERE active = false
+      AND deactivated_at IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_pattern_rules_invalid_at
+        ON pattern_rules (invalid_at);
+
+    CREATE INDEX IF NOT EXISTS idx_pattern_rules_deactivated_at
+        ON pattern_rules (deactivated_at);
+
+    COMMIT;
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-021
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 021_pattern_rule_bitemporal.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/021_pattern_rule_bitemporal.sql
+              echo "Verifying pattern_rules new columns..."
+              psql "$DATABASE_URL" -c "\d pattern_rules"
+              echo "Migration 021 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-021
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# Migration 022 — soft-archive column on decision_cases.
+# ══════════════════════════════════════════════════════════════════════
+# Adds archived_at so the nightly archiver
+# (brain_engine/patterns/case_archiver.py:CaseArchiver) can move
+# stale cases out of the hot mining set without physically deleting
+# the row (Sprint 4 — Ebbinghaus forgetting curve).  Pure ADD
+# COLUMN + index; rollback is a column drop.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cendra-pg-migrations-022
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+data:
+  022_decision_case_archived.sql: |
+    BEGIN;
+
+    ALTER TABLE decision_cases
+        ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
+    CREATE INDEX IF NOT EXISTS idx_dc_archived_at
+        ON decision_cases (archived_at);
+
+    COMMIT;
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cendra-pg-migrate-022
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: migrations
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app: cendra-pg
+        component: migrations
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for cendra-pg-rw to accept connections..."
+              for i in $(seq 1 60); do
+                if pg_isready -h cendra-pg-rw -U "$PGUSER"; then
+                  break
+                fi
+                sleep 5
+              done
+              echo "Applying migration 022_decision_case_archived.sql..."
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/022_decision_case_archived.sql
+              echo "Verifying decision_cases archived_at column..."
+              psql "$DATABASE_URL" -c "\d decision_cases"
+              echo "Migration 022 complete."
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cendra-pg-app
+                  key: uri
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: cendra-pg-migrations-022

@@ -1,0 +1,17 @@
+# Auto-provisions every JSON dashboard from
+# /var/lib/grafana/dashboards (mounted from infra/grafana/dashboards/).
+# New JSONs land in Grafana on next reload — no UI clicks.
+
+apiVersion: 1
+
+providers:
+  - name: brain-engine
+    orgId: 1
+    folder: Brain Engine
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

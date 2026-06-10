@@ -1,0 +1,177 @@
+# Langfuse stack for brain_engine.
+#
+# Self-hosted so trace data stays inside the Cendra perimeter.  The
+# Postgres backend is a single-replica StatefulSet — appropriate for
+# the dev pod's trace volume; production scale-up would add a
+# managed Postgres or a CloudNative-PG cluster.
+#
+# Secrets in this manifest (NEXTAUTH_SECRET, SALT, postgres
+# password) are placeholders.  Replace with values from a real
+# Secret store before exposing the Service via Ingress.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: langfuse-secrets
+  namespace: observability
+type: Opaque
+stringData:
+  POSTGRES_USER: langfuse
+  POSTGRES_PASSWORD: change-me-langfuse-pg
+  POSTGRES_DB: langfuse
+  NEXTAUTH_SECRET: change-me-langfuse-nextauth-secret
+  SALT: change-me-langfuse-salt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-postgres
+  namespace: observability
+  labels:
+    app: langfuse-postgres
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  selector:
+    app: langfuse-postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-postgres
+  namespace: observability
+spec:
+  serviceName: langfuse-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-postgres
+  template:
+    metadata:
+      labels:
+        app: langfuse-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+              name: postgres
+          envFrom:
+            - secretRef:
+                name: langfuse-secrets
+          env:
+            # AKS PVC mount points carry a `lost+found` directory at
+            # the root, which makes Postgres' initdb refuse to use the
+            # mount path directly.  Pointing PGDATA at a subdirectory
+            # sidesteps the check and is the upstream-recommended
+            # pattern for postgres-on-PVC.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - langfuse
+                - -d
+                - langfuse
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse
+  namespace: observability
+  labels:
+    app: langfuse
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: langfuse
+  template:
+    metadata:
+      labels:
+        app: langfuse
+    spec:
+      containers:
+        - name: langfuse
+          image: langfuse/langfuse:2
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: DATABASE_URL
+              value: postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@langfuse-postgres.observability.svc.cluster.local:5432/$(POSTGRES_DB)
+            - name: NEXTAUTH_URL
+              value: http://langfuse.observability.svc.cluster.local:3000
+            - name: TELEMETRY_ENABLED
+              value: "false"
+            - name: LANGFUSE_DEFAULT_PROJECT_ID
+              value: brain-engine-dev
+            - name: LANGFUSE_DEFAULT_PROJECT_ROLE
+              value: ADMIN
+          envFrom:
+            - secretRef:
+                name: langfuse-secrets
+          readinessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse
+  namespace: observability
+  labels:
+    app: langfuse
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    app: langfuse

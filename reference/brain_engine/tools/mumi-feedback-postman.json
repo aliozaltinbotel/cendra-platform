@@ -1,0 +1,319 @@
+{
+  "info": {
+    "_postman_id": "mumi-feedback-real-data-323133",
+    "name": "Brain Engine — mumi-feedback на real data (property 323133)",
+    "description": "Postman collection that exercises all 5 phases of mumi-feedback.md against the live dev API at brain-engine-dev.botel.ai using property 323133's real GraphQL/ES archive. Each request carries a Tests script that asserts an exact or lower-bound count derived from the 2026-05-04 bootstrap run (commit c8a5d04 with multilingual scenario classifier; blacklist invariants added after the bootstrap-validator-gate fix in 634e75c).\n\nHow to run:\n1. Import this JSON into Postman\n2. Create an Environment with:\n     base_url    = https://brain-engine-dev.botel.ai\n     property_id = 323133\n3. Run All — should be 100% green when the dev pipeline is up, the bootstrap has completed at least once, and scripts/cleanup_blacklisted_rules.py has run against the dev DB.\n\nIf any test goes red:\n  • A red on 'cases >= 15' in Folder 1 means the cancellation_request classifier did not pick up refund threads — check the multilingual extension.\n  • A red on 'blacklist: rules_extracted == 0' or 'every candidate marked valid=false' in Folder 1 means the validator gate stopped enforcing NEVER_AUTO_LEARN — investigate brain_engine/patterns/validator.py.\n  • A red on 'rules array empty' / 'no auto-rules persisted' in Folder 1 means cleanup_blacklisted_rules.py has not deactivated the legacy rules in the dev DB — run the script with --apply, or check if a write path skipped the validator gate.\n  • A red on Folder 2 means access_code_release did not classify — same multilingual issue.\n  • A red on Folder 3 means DEFER decision-type mapping regressed.\n  • A red on Folder 4 means temporal navigation broke (as_of query).\n  • A red on Folder 0 (health) means the dev pod is not up.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "base_url", "value": "https://brain-engine-dev.botel.ai"},
+    {"key": "property_id", "value": "323133"}
+  ],
+  "item": [
+    {
+      "name": "0. Setup — health + baseline",
+      "item": [
+        {
+          "name": "GET /health (root)",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"]}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('healthy', () => {",
+              "  const j = pm.response.json();",
+              "  pm.expect(j.status).to.equal('healthy');",
+              "  pm.expect(j.brain_engine_ready).to.equal(true);",
+              "});"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "GET /api/v1/health",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/v1/health", "host": ["{{base_url}}"], "path": ["api","v1","health"]}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('detailed health alive', () => {",
+              "  const j = pm.response.json();",
+              "  pm.expect(j.status).to.equal('healthy');",
+              "  pm.expect(j.version).to.be.a('string');",
+              "});"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "POST bootstrap one-shot (re-mines patterns)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap/property/{{property_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","onboarding","bootstrap","property","{{property_id}}"]
+            },
+            "body": {"mode": "raw", "raw": "{\"days\":180,\"limit\":500,\"dry_run\":false,\"mine_patterns\":true}"}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('bootstrap returned the property', () => pm.expect(j.property_id).to.equal(pm.variables.get('property_id')));",
+              "pm.test('conversations_loaded >= 200', () => pm.expect(j.conversations_loaded).to.be.at.least(200));",
+              "pm.test('cases_extracted >= 250', () => pm.expect(j.cases_extracted).to.be.at.least(250));",
+              "pm.test('rules_emitted >= 3', () => pm.expect(j.rules_emitted).to.be.at.least(3));",
+              "console.log('cases_extracted:', j.cases_extracted, 'rules_emitted:', j.rules_emitted);"
+            ], "type": "text/javascript"}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "1. Phase 1+2 — minority-action pattern (refund / cancellation)",
+      "item": [
+        {
+          "name": "POST /patterns/cases scenario=cancellation_request",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{base_url}}/api/v1/patterns/cases", "host":["{{base_url}}"], "path":["api","v1","patterns","cases"]},
+            "body": {"mode": "raw", "raw": "{\"scenario\":\"cancellation_request\",\"property_id\":\"{{property_id}}\",\"limit\":100}"}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('refund/cancellation cases >= 15 (multilingual classifier captured them)', () => pm.expect(j.total).to.be.at.least(15));",
+              "console.log('cancellation_request cases:', j.total);"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "POST /patterns/extract for cancellation_request",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{base_url}}/api/v1/patterns/extract", "host":["{{base_url}}"], "path":["api","v1","patterns","extract"]},
+            "body": {"mode": "raw", "raw": "{\"scenario\":\"cancellation_request\",\"property_id\":\"{{property_id}}\",\"owner_id\":\"\"}"}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('total_cases >= 15', () => pm.expect(j.total_cases).to.be.at.least(15));",
+              "pm.test('blacklist: rules_extracted == 0 (NEVER_AUTO_LEARN gate)', () => pm.expect(j.rules_extracted).to.equal(0));",
+              "pm.test('blacklist: miner still emits at least one candidate', () => pm.expect(j.rules.length).to.be.at.least(1));",
+              "pm.test('blacklist: every candidate marked valid=false', () => pm.expect(j.rules.every(r => r.valid === false)).to.equal(true));",
+              "pm.test('blacklist: reason cites NEVER_AUTO_LEARN', () => pm.expect(j.rules[0].validation_reasons[0]).to.include('NEVER_AUTO_LEARN'));",
+              "console.log('positive:', j.positive_cases, 'negative:', j.negative_cases, 'rules_extracted:', j.rules_extracted);"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "GET /patterns/rules (cancellation_request rules)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules?scenario=cancellation_request&scope=property&scope_id={{property_id}}",
+              "host": ["{{base_url}}"], "path":["api","v1","patterns","rules"],
+              "query": [
+                {"key":"scenario","value":"cancellation_request"},
+                {"key":"scope","value":"property"},
+                {"key":"scope_id","value":"{{property_id}}"}
+              ]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('cancellation_request blacklisted (no auto-rules persisted)', () => pm.expect(j.total).to.equal(0));",
+              "pm.test('rules array empty', () => pm.expect(j.rules.length).to.equal(0));",
+              "j.rules.forEach(r => console.log('UNEXPECTED active rule:', r.scenario, r.action_type, 'support=' + r.support_count, 'mode=' + r.execution_mode, '— cleanup script may not have run'));"
+            ], "type": "text/javascript"}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "2. Phase 3 — ID-gate / access_code_release",
+      "item": [
+        {
+          "name": "POST /patterns/cases scenario=access_code_release",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{base_url}}/api/v1/patterns/cases", "host":["{{base_url}}"], "path":["api","v1","patterns","cases"]},
+            "body": {"mode": "raw", "raw": "{\"scenario\":\"access_code_release\",\"property_id\":\"{{property_id}}\",\"limit\":50}"}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('>= 6 access_code_release cases', () => pm.expect(j.total).to.be.at.least(6));",
+              "console.log('access_code_release cases:', j.total);"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "GET /patterns/rules (access_code_release rules)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules?scenario=access_code_release&scope=property&scope_id={{property_id}}",
+              "host":["{{base_url}}"], "path":["api","v1","patterns","rules"],
+              "query": [
+                {"key":"scenario","value":"access_code_release"},
+                {"key":"scope","value":"property"},
+                {"key":"scope_id","value":"{{property_id}}"}
+              ]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('>= 1 access_code_release rule', () => pm.expect(j.total).to.be.at.least(1));",
+              "j.rules.forEach(r => console.log('rule:', r.scenario, r.action_type, 'support=' + r.support_count));"
+            ], "type": "text/javascript"}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "3. Phase 4 — DEFER (PM \"не ответил\" / 5-day-too-early)",
+      "item": [
+        {
+          "name": "POST /patterns/cases (full property, count DEFER)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{base_url}}/api/v1/patterns/cases", "host":["{{base_url}}"], "path":["api","v1","patterns","cases"]},
+            "body": {"mode": "raw", "raw": "{\"property_id\":\"{{property_id}}\",\"limit\":500}"}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "const defers = j.cases.filter(c => c.decision_type === 'defer');",
+              "pm.test('>= 13 DEFER cases', () => pm.expect(defers.length).to.be.at.least(13));",
+              "pm.test('DEFER spread across multiple stages', () => {",
+              "  const stages = new Set(defers.map(c => c.stage));",
+              "  pm.expect(stages.size).to.be.at.least(2);",
+              "});",
+              "console.log('DEFER cases:', defers.length, 'across stages', [...new Set(defers.map(c=>c.stage))].join(','));"
+            ], "type": "text/javascript"}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "4. Phase 5 — WiFi as_of temporal navigation",
+      "item": [
+        {
+          "name": "GET memory current (no as_of)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties/{{property_id}}/memory?limit=20",
+              "host":["{{base_url}}"], "path":["api","v1","properties","{{property_id}}","memory"],
+              "query":[{"key":"limit","value":"20"}]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('>= 8 facts visible currently', () => pm.expect((j.facts||[]).length).to.be.at.least(8));",
+              "const wifiFact = (j.facts||[]).find(f => /wifi/i.test(f.text));",
+              "pm.test('wifi password fact present', () => pm.expect(wifiFact, JSON.stringify(j.facts).slice(0,200)).to.not.be.undefined);",
+              "if (wifiFact) console.log('wifi fact:', wifiFact.text.slice(0,100));"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "GET memory as_of 2026-04-01 (before facts existed)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties/{{property_id}}/memory?limit=20&as_of=2026-04-01T00:00:00Z",
+              "host":["{{base_url}}"], "path":["api","v1","properties","{{property_id}}","memory"],
+              "query":[
+                {"key":"limit","value":"20"},
+                {"key":"as_of","value":"2026-04-01T00:00:00Z"}
+              ]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('0 facts before they were created', () => pm.expect((j.facts||[]).length).to.equal(0));"
+            ], "type": "text/javascript"}
+          }]
+        },
+        {
+          "name": "GET memory as_of 2026-04-29 (after facts created)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties/{{property_id}}/memory?limit=20&as_of=2026-04-29T00:00:00Z",
+              "host":["{{base_url}}"], "path":["api","v1","properties","{{property_id}}","memory"],
+              "query":[
+                {"key":"limit","value":"20"},
+                {"key":"as_of","value":"2026-04-29T00:00:00Z"}
+              ]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('>= 8 facts after creation', () => pm.expect((j.facts||[]).length).to.be.at.least(8));"
+            ], "type": "text/javascript"}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "5. Phase metrics — Prometheus pipeline (M3)",
+      "item": [
+        {
+          "name": "GET /metrics — brain_patterns_rules_emitted_total has values",
+          "request": {
+            "method": "GET",
+            "url": {"raw":"{{base_url}}/metrics","host":["{{base_url}}"],"path":["metrics"]}
+          },
+          "event": [{
+            "listen": "test",
+            "script": {"exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const text = pm.response.text();",
+              "const re = /^brain_patterns_rules_emitted_total\\{[^}]+\\}\\s+(\\d+(?:\\.\\d+)?)/m;",
+              "const m = text.match(re);",
+              "pm.test('brain_patterns_rules_emitted_total has at least one labeled value', () => pm.expect(m, 'no labeled series found').to.not.be.null);",
+              "if (m) console.log('metric value:', m[1]);"
+            ], "type": "text/javascript"}
+          }]
+        }
+      ]
+    }
+  ]
+}

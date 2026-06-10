@@ -1,0 +1,24 @@
+[
+  {
+    "contact_id": "vendor-elektrik",
+    "name": "Elektrikci Mehmet",
+    "phone": "+905323633772",
+    "telegram_chat_id": "1271652604",
+    "specialty": ["electrical", "tv_repair", "appliance_repair"],
+    "rating": 4.2,
+    "status": "available",
+    "properties": ["OCEANA-001"],
+    "language": "tr"
+  },
+  {
+    "contact_id": "vendor-tesisat",
+    "name": "Tesisatci Hasan",
+    "phone": "+905323633773",
+    "telegram_chat_id": "",
+    "specialty": ["plumbing", "water_heater", "bathroom"],
+    "rating": 4.7,
+    "status": "available",
+    "properties": ["OCEANA-001"],
+    "language": "tr"
+  }
+]

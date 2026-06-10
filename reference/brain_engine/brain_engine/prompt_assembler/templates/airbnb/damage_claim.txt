@@ -1,0 +1,84 @@
+You are building an Airbnb damage claim for submission to the Resolution Center. Follow Airbnb's requirements precisely.
+
+INCIDENT INFORMATION:
+{slots}
+
+DAMAGE ANALYSIS:
+{knowledge}
+
+AIRBNB DAMAGE CLAIM REQUIREMENTS:
+
+1. THE 24-HOUR RULE
+   - Claims MUST be submitted within 24 hours of the guest's checkout
+   - Claims MUST be submitted BEFORE the next guest checks in
+   - Late claims are almost always denied — this is the #1 reason for rejection
+   - Document the exact checkout time and calculate the deadline
+
+2. REQUIRED DOCUMENTATION CHECKLIST
+   □ Before photos (pre-stay condition, timestamped)
+   □ After photos (post-stay damage, timestamped)
+   □ Detailed damage description (location, type, extent)
+   □ Repair estimate or replacement cost (from vendor if possible)
+   □ Host statement (factual, non-emotional narrative)
+   □ Receipt or proof of original purchase (if claiming replacement cost)
+   □ Communication log with guest (if damage was discussed)
+
+3. CLAIM DOCUMENT FORMAT
+
+   Subject: Damage Claim - Booking [BOOKING_ID] - [GUEST_NAME]
+
+   SECTION 1: INCIDENT SUMMARY
+   - Property: [Address]
+   - Guest: [Name]
+   - Check-in: [Date/Time]
+   - Check-out: [Date/Time]
+   - Damage discovered: [Date/Time]
+
+   SECTION 2: DAMAGE DESCRIPTION
+   For each damaged item:
+   - Item: [Description]
+   - Location: [Where in the property]
+   - Condition before stay: [Description + reference to before photos]
+   - Condition after stay: [Description + reference to after photos]
+   - Type of damage: [Stain/scratch/break/etc.]
+
+   SECTION 3: COST BREAKDOWN
+   | Item | Repair/Replace | Cost | Evidence |
+   |------|---------------|------|----------|
+   | [Item] | [R or R] | $[Amount] | [Photo ref] |
+   | TOTAL | | $[Total] | |
+
+   SECTION 4: HOST STATEMENT
+   [Factual, chronological narrative of events]
+
+   SECTION 5: EVIDENCE INDEX
+   - Photo 1: [Description, timestamp]
+   - Photo 2: [Description, timestamp]
+   - Receipt 1: [Description]
+
+4. WRITING THE HOST STATEMENT
+   - Be factual and chronological — avoid emotional language
+   - State what you observed, when you observed it, and what action you took
+   - Reference specific evidence (photos, messages) by number
+   - Do NOT accuse the guest of intentional damage
+   - Focus on the condition change between check-in and check-out
+
+5. COST GUIDELINES
+   - Claim replacement cost only if repair is not feasible
+   - Apply depreciation for items over 2 years old
+   - Airbnb typically covers actual cost, not retail price
+   - Include labor costs for professional repairs
+   - Get at least one written estimate from a licensed professional
+
+6. SUBMISSION TIPS
+   - Submit through the Resolution Center, not customer support
+   - Request the exact amount — do not round up or inflate
+   - Respond to Airbnb's follow-up questions within 24 hours
+   - Keep all communication professional and documented
+
+NEVER:
+- Inflate damage costs or exaggerate the extent of damage
+- Include pre-existing damage in the claim
+- Use emotional or accusatory language
+- Submit without photo evidence
+- Miss the 24-hour deadline

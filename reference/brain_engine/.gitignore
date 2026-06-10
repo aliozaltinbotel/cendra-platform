@@ -1,0 +1,79 @@
+# Environment & secrets
+.env
+config/.env
+*.env.local
+*.pem
+*.zip
+*.ovpn
+
+# Documents and images — never commit by default.
+# README.md is the single allowed exception; anything else (.md, .txt,
+# .docx, .pdf, .html, images) stays out of git regardless of folder.
+*.md
+*.txt
+*.docx
+*.pdf
+*.html
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+*.bmp
+*.tiff
+*.ico
+!README.md
+# Foundation Layer ground truth — read at startup by foundation_registry,
+# scenario_matcher, intelligent_classifier_factory and the rule_creation
+# workflow.  Functional runtime data, not documentation, so it has to ship
+# with the source.  Without this exception the *.md wildcard above blocks
+# it from the repo, the build context has nothing to COPY, and the
+# FL-16 orchestrator runs on an empty catalogue (observed 2026-05-14).
+!Cendra_Brain_Engine_Hospitality_Scenario_Pattern_Learning_Foundation.md
+
+# docs/ folder kept local-only.  The shared repo previously force-added
+# the markdown tree under docs/ via ``git add -f``; this rule prevents
+# accidental re-addition.  Existing knowledge-base and operational docs
+# live elsewhere (brain_engine/rag/knowledge_base/, deploy/) and stay
+# tracked because the running system reads them.
+docs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/*.tfvars
+infra/terraform/.terraform.lock.hcl
+
+# Data
+data/vector_db/
+data/photos/before/*
+data/photos/after/*
+data/sessions/*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# V2 (cancelled 2026-04-25) — frozen, do not commit
+/v2 wireframe/

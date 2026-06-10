@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Brainengine Test UI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Brainengine Test UI</h1>
+    <div id="api-key-indicator" class="hidden">key set</div>
+  </header>
+
+  <dialog id="api-key-dialog">
+    <form method="dialog">
+      <label for="api-key-input">X-API-Key (leave blank if middleware disabled)</label>
+      <input id="api-key-input" type="password" autocomplete="off">
+      <menu><button value="ok">Save</button></menu>
+    </form>
+  </dialog>
+
+  <section id="setup">
+    <label for="property-select">Property</label>
+    <select id="property-select"></select>
+
+    <details id="reservation-details">
+      <summary>Reservation details</summary>
+      <div class="grid">
+        <label for="check-in">Check-in</label>
+        <input id="check-in" type="datetime-local">
+
+        <label for="check-out">Check-out</label>
+        <input id="check-out" type="datetime-local">
+
+        <label for="res-status">Status</label>
+        <select id="res-status">
+          <option value="confirmed">confirmed</option>
+          <option value="pending">pending</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+
+        <label for="res-channel">Channel</label>
+        <select id="res-channel"><option value="">(use property default)</option></select>
+
+        <label for="res-adults">Adults</label>
+        <input id="res-adults" type="number" min="0" step="1" value="1">
+
+        <label for="res-children">Children</label>
+        <input id="res-children" type="number" min="0" step="1" value="0">
+
+        <label for="res-amount">Amount</label>
+        <input id="res-amount" type="number" min="0" step="0.01" value="1000">
+
+        <label for="res-currency">Currency</label>
+        <input id="res-currency" type="text" value="USD" maxlength="3">
+
+        <label for="res-paid">Paid</label>
+        <input id="res-paid" type="checkbox">
+
+        <label for="guest-first">Guest first name</label>
+        <input id="guest-first" type="text" value="Test">
+
+        <label for="guest-last">Guest last name</label>
+        <input id="guest-last" type="text" value="Harness">
+      </div>
+    </details>
+
+    <label for="first-message">First guest message</label>
+    <textarea id="first-message" rows="2">Is early check-in possible?</textarea>
+    <button id="seed-btn">Create test scenario</button>
+    <button id="reset-btn" disabled>New test scenario</button>
+    <div id="seed-status" role="status" aria-live="polite"></div>
+  </section>
+
+  <section id="chat">
+    <nav class="tabs" role="tablist" aria-label="Conversation views">
+      <button id="tab-conversation" role="tab" aria-controls="panel-conversation" aria-selected="true" data-tab="conversation" class="active">Conversation</button>
+      <button id="tab-timeline" role="tab" aria-controls="panel-timeline" aria-selected="false" tabindex="-1" data-tab="timeline">Timeline</button>
+      <button id="tab-raw" role="tab" aria-controls="panel-raw" aria-selected="false" tabindex="-1" data-tab="raw">Raw stream</button>
+    </nav>
+
+    <div id="panel-conversation" class="tab-panel" role="tabpanel" aria-labelledby="tab-conversation" data-panel="conversation">
+      <div id="messages" aria-live="polite"></div>
+      <form id="compose">
+        <label for="compose-input" class="visually-hidden">Send a message</label>
+        <input id="compose-input" type="text" placeholder="Send a message..." disabled>
+        <button id="compose-send" disabled>Send</button>
+      </form>
+    </div>
+
+    <div id="panel-timeline" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-timeline" data-panel="timeline" hidden>
+      <ol id="timeline"></ol>
+    </div>
+
+    <div id="panel-raw" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-raw" data-panel="raw" hidden>
+      <button id="raw-copy">Copy</button>
+      <pre id="raw-stream"></pre>
+    </div>
+  </section>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

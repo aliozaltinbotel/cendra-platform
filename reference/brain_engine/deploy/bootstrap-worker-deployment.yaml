@@ -1,0 +1,125 @@
+# Stage 2 bootstrap worker — always-on Deployment (AKS, namespace `dev`).
+#
+# ACTIVE runtime for the Stage 2 worker. Chosen 2026-05-29 after KEDA
+# was found absent on the shared dev AKS (`scaledjobs.keda.sh` CRD not
+# present). A Deployment keeps the blast radius inside namespace `dev`
+# and adds nothing cluster-wide — prod workloads on the same cluster
+# are untouched. The KEDA ScaledJob alternative (auto-scale 0->N) is
+# kept at `deploy/bootstrap-worker-scaledjob.yaml` for when/if KEDA is
+# installed; do NOT apply both.
+#
+# Same image as the API, different command. The worker long-polls the
+# queue continuously (BOOTSTRAP_WORKER_CONTINUOUS=true) and drains each
+# batch; SIGTERM flips a stop event so a rollout finishes the current
+# message before exiting (terminationGracePeriodSeconds below). A
+# bootstrap that outlasts the grace period is SIGKILLed and its row is
+# reclaimed by the orphan reaper — the same safety net Stage 1 ships.
+#
+# Scaling is manual: bump `replicas`. Service Bus PeekLock keeps two
+# replicas from processing the same message; the in-DB `queued` status
+# check makes a double-delivery idempotent.
+#
+# ─────────────────────────────────────────────────────────────────
+# Prerequisites before apply (tracked in project memory `stage2-...`):
+#   1. Queue `bootstrap-intents` exists in `booklyservicebus`
+#      (duplicate-detection + dead-lettering).
+#   2. Worker env mirrors the API Deployment — sensitive values in
+#      Secret `brain-engine-secrets`, the rest in ConfigMap
+#      `brain-engine-config`, kept in sync with brain-engine-dev.yaml.
+#      Minimum: DATABASE_URL, REDIS_URL, QDRANT_URL,
+#      AZURE_SERVICEBUS_CONNECTION_STRING, the *_STORE_BACKEND knobs,
+#      SANDBOX_GENERATOR_BACKEND + AZURE_OPENAI_*, and UNIFIED_DATA_*.
+#
+# Apply:    kubectl apply -f deploy/bootstrap-worker-deployment.yaml -n dev
+# Inspect:  kubectl logs -n dev deploy/bootstrap-worker -f
+# Scale:    kubectl scale -n dev deploy/bootstrap-worker --replicas=2
+# ─────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bootstrap-worker
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: bootstrap-worker
+    app.kubernetes.io/part-of: brain-engine
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bootstrap-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bootstrap-worker
+        app.kubernetes.io/part-of: brain-engine
+    spec:
+      # Let the worker finish the in-flight message on a rollout; a
+      # longer bootstrap is interrupted and the reaper reclaims it.
+      terminationGracePeriodSeconds: 120
+      # Same private ACR + pull secret the API Deployment uses.
+      imagePullSecrets:
+        - name: acr-secret
+      containers:
+        - name: bootstrap-worker
+          # Tag MUST match the live brain-engine image (CI-managed —
+          # there is no ``:latest`` in ACR). Keep in sync with the API
+          # Deployment's tag; the proper fix is to template this from
+          # the Helm chart (the Path 1 follow-up).
+          image: "booklycontainer.azurecr.io/brainengine:dev-12425"
+          imagePullPolicy: Always
+          command: ["python", "-m", "workers.bootstrap_worker"]
+          envFrom:
+            # Mirror of the API Deployment env (see prerequisite 2).
+            - configMapRef:
+                name: brain-engine-config
+                optional: true
+            - secretRef:
+                name: brain-engine-secrets
+                optional: true
+          env:
+            # Always-on long-poll (Deployment runtime).
+            - name: BOOTSTRAP_WORKER_CONTINUOUS
+              value: "true"
+            - name: BOOTSTRAP_WORKER_RECEIVE_BATCH
+              value: "1"
+            - name: BOOTSTRAP_WORKER_MAX_WAIT_SECONDS
+              value: "5"
+            # The worker always needs the SSoT; force the Postgres
+            # state store on regardless of the API's gating flag.
+            - name: PROPERTY_STATE_ENABLED
+              value: "true"
+            - name: TENANT_REGISTRY_BACKEND
+              value: "postgres"
+            # Elasticsearch property enrichment.  The worker is the real
+            # harvest path under BOOTSTRAP_QUEUE_ENABLED and does NOT read
+            # the API's `brain-engine` ConfigMap (the `brain-engine-config`
+            # envFrom above is optional and does not exist), so the flag +
+            # endpoint are forced inline here — same pattern as
+            # PROPERTY_STATE_ENABLED.  The read-only API key flows from
+            # `brain-engine-secrets` via secretRef (value set out-of-band).
+            - name: ES_ENRICHMENT_ENABLED
+              value: "1"
+            - name: ELASTICSEARCH_ENDPOINT
+              value: "https://elasticsearch-cluster-es-http.elasticsearch.svc:9200"
+            # The worker BUILDS the PropertyProfile during harvest and
+            # must persist it to cendra-pg, not its own InMemory store
+            # (the os.getenv default in workers/bootstrap_deps.py:241).
+            # With "memory" the profile lands in this pod's RAM, is lost
+            # on restart, and is invisible to the API pod (which reads
+            # Postgres) — so property_state stays "primed" while the
+            # profile 404s and the agent defers every answer. Force it on
+            # inline, same as the SSoT flags above; reuses DATABASE_URL
+            # already supplied via the brain-engine-config mirror.
+            - name: PROPERTY_PROFILE_STORE_BACKEND
+              value: "postgres"
+          # Bootstrap is memory-heavy (foundation scenarios +
+          # transformer weights + conversation archive + LLM); 1Gi
+          # OOMKills it. Match the API Deployment's envelope.
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"

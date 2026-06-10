@@ -1,0 +1,4 @@
+# Extra dependencies for tools/seed_fake_conversations.py only.
+# Install with: pip install -r tools/requirements-seeder.txt
+# (python-dotenv and pytest come from the main requirements.txt.)
+elasticsearch>=8.11,<9.0

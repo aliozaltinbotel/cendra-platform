@@ -1,0 +1,35 @@
+# Hospitality pack — autonomy tier ceilings per action kind.
+#
+# Consumed by core.brain.certificates.TierPolicy (the kernel ships no
+# vocabulary; this file is the vertical's conservative baseline, aligned
+# with EU AI Act Art. 14 — human oversight on significant-effect actions).
+# Extracted at Batch 1 port time from the reference's
+# certificates/policy.py _DEFAULTS (CardActionKind -> AutonomyTier) and
+# cards/action_kinds.py vocabulary; the loader lands with the pack
+# infrastructure (Batch 6).
+#
+# Tiers (Feng et al. arXiv:2506.12469, rank 1-5):
+#   observer < approver < consultant < collaborator < operator
+
+tier_ceilings:
+  # Communication / bookkeeping — low risk, high autonomy ok
+  send_message: collaborator
+  request_document: collaborator
+  mark_resolved: operator
+  log_decision: operator
+  handoff_to_teammate: operator
+  # Booking lifecycle — material consequences
+  hold_for_review: collaborator
+  block_date: collaborator
+  confirm_booking: approver
+  cancel_booking: approver
+  # Pricing / negotiation
+  apply_discount: consultant
+  counter_offer: consultant
+  # Operations / dispatch
+  dispatch_vendor: consultant
+  # Financial / security-sensitive — must be approved
+  charge_fee: approver
+  issue_refund: approver
+  release_code: approver
+  escalate: approver

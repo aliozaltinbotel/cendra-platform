@@ -1,0 +1,20 @@
+# Auto-provisioned Prometheus datasource so Grafana finds the local
+# scraper on first boot — no manual UI step required.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    # UID pinned so the dashboards in
+    # infra/grafana/dashboards/*.json (which reference
+    # "uid": "prometheus") resolve to this datasource on first
+    # boot.  Without it Grafana would auto-generate a random UID
+    # and every panel would render "No data".
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s

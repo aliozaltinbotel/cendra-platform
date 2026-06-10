@@ -1,0 +1,203 @@
+# Pipeline to build and deploy depending on dev or prod branch
+
+trigger:
+- dev
+- prod
+
+resources:
+- repo: self
+
+variables:
+  dockerRegistryServiceConnection: '20241202'
+  imageRepository: 'brainengine'
+  containerRegistry: 'booklycontainer.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: BuildAndDeploy
+  displayName: Build and Deploy
+  jobs:
+  - job: Build
+    displayName: Build and Deploy Job
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - script: |
+        echo "Branch name: $(Build.SourceBranchName)"
+
+        if [ "$(Build.SourceBranchName)" = "dev" ]; then
+          echo "##vso[task.setvariable variable=envFile]deploy/brain-engine-dev.yaml"
+          echo "##vso[task.setvariable variable=envName]dev"
+          echo "##vso[task.setvariable variable=tag]dev-$(Build.BuildId)"
+        elif [ "$(Build.SourceBranchName)" = "prod" ]; then
+          echo "##vso[task.setvariable variable=envFile]deploy/brain-engine-prod.yaml"
+          echo "##vso[task.setvariable variable=envName]prod"
+          echo "##vso[task.setvariable variable=tag]prod-$(Build.BuildId)"
+        else
+          echo "Branch is neither dev nor prod. Exiting pipeline."
+          exit 0
+        fi
+      displayName: "Determine Environment Variables"
+
+    # Cheap pre-build guard: full symbol-table compile of the entry
+    # module catches SyntaxErrors that grammar-only ``ast.parse`` lets
+    # through (e.g. ``global X`` placed after a read of ``X``).  These
+    # would otherwise reach the cluster, where uvicorn's supervisor
+    # masks the crashloop and ``helm --atomic`` reports "succeeded"
+    # while every worker dies on import.  Catching it here costs ~5s.
+    - script: |
+        set -euo pipefail
+        python3 -m compileall -q api_server brain_engine
+      displayName: "Python symbol-table compile gate"
+      condition: and(succeeded(), not(eq(variables['envFile'], '')))
+
+    # Tests are intentionally OFF in the dev/prod pipeline.  The whole
+    # tests/ tree was removed; pytest, coverage gate, and coverage
+    # publish steps are gone.  The compileall symbol-table gate above
+    # is the only pre-build safety net.
+
+    - task: Docker@2
+      displayName: "Login to ACR"
+      condition: and(succeeded(), not(eq(variables['envFile'], '')))
+      inputs:
+        containerRegistry: '$(dockerRegistryServiceConnection)'
+        command: 'login'
+
+    - script: |
+        docker buildx create --use --name cachebuild 2>/dev/null || docker buildx use cachebuild
+        docker buildx build \
+          --cache-from type=registry,ref=$(containerRegistry)/$(imageRepository):cache \
+          --cache-to type=registry,ref=$(containerRegistry)/$(imageRepository):cache,mode=max \
+          --tag $(containerRegistry)/$(imageRepository):$(tag) \
+          --file $(dockerfilePath) \
+          --push \
+          .
+      displayName: "Build and push with cache"
+      condition: and(succeeded(), not(eq(variables['envFile'], '')))
+
+    - task: Kubernetes@1
+      displayName: "Login to AKS"
+      condition: and(succeeded(), not(eq(variables['envFile'], '')))
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: 'aks-prod-ephemeral'
+        command: 'login'
+
+    - task: AzureCLI@2
+      displayName: "Deploy to AKS"
+      condition: and(succeeded(), not(eq(variables['envFile'], '')))
+      inputs:
+        azureSubscription: 'Azure subscription 1(3)(25e4a027-53b5-408e-bf95-adce3c4aa503)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          # Authenticate with ACR's Helm registry
+          az acr login --name booklycontainer
+
+          # Pull the chart and untar it to /tmp
+          helm pull oci://booklycontainer.azurecr.io/helm/golden --untar -d /tmp
+
+          # Helm upgrade/install command
+          helm upgrade --install \
+            --atomic \
+            --history-max 2 \
+            brain-engine \
+            /tmp/golden \
+            -f $(envFile) \
+            --set image.tag=$(tag) \
+            --timeout 10m0s \
+            -n $(envName)
+
+    # ── Stage 2 bootstrap worker (KEDA ScaledJob) ───────────────────
+    # The worker is a SECOND workload; the shared `golden` chart is
+    # single-process, so it ships as a standalone manifest deployed
+    # here with the SAME image tag as the API — killing the tag drift
+    # that otherwise pins the worker to an old build. Now that KEDA is
+    # installed on the dev cluster (scaledjobs.keda.sh CRD), the worker
+    # runs as a ScaledJob (auto-scale 0->N on the bootstrap-intents
+    # queue, scale-to-zero when idle = cost saving) instead of an
+    # always-on Deployment. Gated to dev (Stage 2 is not validated in
+    # prod, and BOOTSTRAP_QUEUE_ENABLED is off there) and best-effort
+    # (continueOnError) so a worker hiccup can never block or roll back
+    # the API deploy above. The worker's env comes from the
+    # `brain-engine-secrets` secret, managed out of band as a mirror of
+    # the values `env` (rarely changes).
+    - task: AzureCLI@2
+      displayName: "Deploy Stage 2 bootstrap worker — KEDA ScaledJob (dev only)"
+      continueOnError: true
+      condition: and(succeeded(), eq(variables['envName'], 'dev'))
+      inputs:
+        azureSubscription: 'Azure subscription 1(3)(25e4a027-53b5-408e-bf95-adce3c4aa503)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          # Pin the ScaledJob's job template to the image just built for
+          # the API (same drift-kill as the old Deployment step). A
+          # ScaledJob has no rollout to wait on — KEDA spawns Jobs on
+          # demand from the queue — so we just apply and report.
+          sed "s|brainengine:[^\"]*|brainengine:$(tag)|" \
+            deploy/bootstrap-worker-scaledjob.yaml \
+            | kubectl apply -n $(envName) -f -
+          kubectl -n $(envName) get scaledjob bootstrap-worker -o wide \
+            || echo "scaledjob not yet visible — non-fatal"
+          # NOTE: the old always-on Deployment (bootstrap-worker) is
+          # retired MANUALLY once the ScaledJob is verified to drain the
+          # queue — deliberately NOT auto-deleted here so a misconfigured
+          # ScaledJob can never leave the queue with no consumer. Running
+          # both briefly is safe (Service Bus PeekLock + in-DB queued
+          # idempotency prevent double-processing).
+
+    # ── Stage 3 freshness consumer ──────────────────────────────────
+    # A THIRD workload (Stage 3 Track A): turns backend botel-*-sync OTA
+    # events into refresh intents on the same bootstrap-intents queue.
+    # Same standalone-manifest pattern as the bootstrap worker above —
+    # pinned to the API's image tag to kill drift, dev-only, best-effort
+    # so a consumer hiccup never blocks or rolls back the API deploy.
+    # Env comes from the same `brain-engine-secrets` secret. Inert until
+    # the Deployment is applied + the cascade subscription is reachable.
+    - task: AzureCLI@2
+      displayName: "Deploy Stage 3 freshness consumer (dev only)"
+      continueOnError: true
+      condition: and(succeeded(), eq(variables['envName'], 'dev'))
+      inputs:
+        azureSubscription: 'Azure subscription 1(3)(25e4a027-53b5-408e-bf95-adce3c4aa503)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          # Pin the consumer to the image just built for the API (same
+          # rationale as the worker step: a real apply failure fails the
+          # step; a slow image pull does not).
+          sed "s|brainengine:[^\"]*|brainengine:$(tag)|" \
+            deploy/freshness-consumer-deployment.yaml \
+            | kubectl apply -n $(envName) -f -
+          kubectl -n $(envName) rollout status \
+            deploy/freshness-consumer --timeout=600s \
+            || echo "consumer rollout still progressing after 600s — non-fatal"
+
+    # ── Stage 3 nightly stale-sweep CronJob ─────────────────────────
+    # A FOURTH workload (Stage 3 Track B): a once-a-night CronJob that
+    # finds primed properties older than the freshness TTL and enqueues
+    # proactive stale_refresh intents onto the same bootstrap-intents
+    # queue. Same standalone-manifest + image-pin pattern as the worker
+    # and consumer; dev-only, best-effort. A CronJob apply is idempotent
+    # and has no rollout to wait on. Inert on first apply
+    # (FRESHNESS_SWEEP_DRY_RUN defaults true in brain-engine-secrets)
+    # until the secret flips it live.
+    - task: AzureCLI@2
+      displayName: "Deploy Stage 3 stale-sweep CronJob (dev only)"
+      continueOnError: true
+      condition: and(succeeded(), eq(variables['envName'], 'dev'))
+      inputs:
+        azureSubscription: 'Azure subscription 1(3)(25e4a027-53b5-408e-bf95-adce3c4aa503)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          # Pin the CronJob's pod template to the image just built for
+          # the API (same sed as the worker/consumer steps).
+          sed "s|brainengine:[^\"]*|brainengine:$(tag)|" \
+            deploy/freshness-sweep-cronjob.yaml \
+            | kubectl apply -n $(envName) -f -

@@ -1,0 +1,79 @@
+# Real-data memory + patterns smoke harness — one-shot k8s Job.
+#
+# Apply with:
+#
+#   kubectl apply -f deploy/memory-smoke-job.yaml -n dev
+#
+# Then inspect the run:
+#
+#   kubectl logs -n dev job/memory-smoke -f
+#
+# Re-running requires deleting the prior Job first
+# (``kubectl delete job memory-smoke -n dev``) — Jobs are
+# immutable on the property/days/limit fields encoded below.
+#
+# The Job hits the in-cluster brain-engine service at
+# ``http://brain-engine.dev.svc.cluster.local`` over the
+# admin smoke endpoint.  No outbound traffic, no secrets.
+#
+# Property ``323133`` is the V1 demo whitelist entry (ZAŽI,
+# Hostaway provider, customerId/orgId match the dev pod env).
+# Override via the PROPERTY_ID env knob if a different
+# pre-warmed listing is needed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memory-smoke
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: memory-smoke
+    app.kubernetes.io/part-of: brain-engine
+    app.kubernetes.io/component: smoke
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-smoke
+        app.kubernetes.io/part-of: brain-engine
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: smoke
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BRAIN_ENGINE_URL
+              value: "http://brain-engine.dev.svc.cluster.local"
+            - name: PROPERTY_ID
+              value: "323133"
+            - name: DAYS
+              value: "30"
+            - name: LIMIT
+              value: "25"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              endpoint="$BRAIN_ENGINE_URL/api/admin/memory/smoke/$PROPERTY_ID"
+              echo "POST $endpoint?days=$DAYS&limit=$LIMIT"
+              # Do not exit non-zero on FAIL — the report itself
+              # carries the verdict and the operator wants it in
+              # the log even when stages fail.  Job success here
+              # means "the harness ran end-to-end".
+              curl -sS -X POST \
+                -H "Content-Type: application/json" \
+                "$endpoint?days=$DAYS&limit=$LIMIT" \
+                | tee /tmp/smoke.json
+              echo
+              echo "--- aggregate status ---"
+              grep -o '"status":"[A-Z]*"' /tmp/smoke.json | head -1
+          resources:
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

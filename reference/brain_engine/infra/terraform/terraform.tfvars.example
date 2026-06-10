@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in values
+
+project_name = "brain-engine"
+environment  = "prod"
+aws_region   = "us-east-1"
+
+# ECS Resources
+backend_cpu            = 512
+backend_memory         = 1024
+frontend_cpu           = 256
+frontend_memory        = 512
+backend_desired_count  = 2
+frontend_desired_count = 2
+
+# Domain (optional — set up Route53 + ACM manually)
+domain_name = ""
+
+# Secrets (use terraform.tfvars or TF_VAR_ env vars)
+openai_api_key = ""
+elevenlabs_agent_id = ""
+nuki_api_key   = ""

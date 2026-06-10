@@ -13,3 +13,6 @@
 *.md
 !web/README.md
 !api/README.md
+
+# Cendra: read-only porting reference, never in any image (C2 in FORK_LEDGER.md)
+reference/
