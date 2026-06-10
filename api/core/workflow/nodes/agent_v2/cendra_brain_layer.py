@@ -63,7 +63,7 @@ def record_agent_run(
     tenant_id: str,
     app_id: str,
     agent_id: str,
-    workflow_run_id: str,
+    workflow_run_id: str | None,
     status: str,
 ) -> None:
     """Append one agent run to the tenant's episodic memory tier.

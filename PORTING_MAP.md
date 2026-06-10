@@ -39,12 +39,12 @@ Source of truth for what moves where, in which batch, and its status. Source pat
 
 | Item | Target | Notes | Status |
 |---|---|---|---|
-| Gate chain composition (`decision_pipeline/adapter.py`) | `api/core/brain/gates.py` | Sync interface: compliance → certificate → abstention → policy/risk; short-circuit semantics preserved | TODO |
-| T1+T2 node_runtime/node_factory hooks | per CLAUDE.md | `CENDRA-HOOK` markers + ledger | TODO |
-| T3 agent_v2 context+gate injection | per CLAUDE.md | Follow `plugin_strategy_adapter.py` pattern | TODO |
-| T6 brain memory as retrieval source | per CLAUDE.md | Or zero-edit via external-knowledge loopback — decide here | TODO |
-| T7 DecisionCase capture on run events | per CLAUDE.md | Idempotent ingest, conversation id join key | TODO |
-| T8 docker/env | per CLAUDE.md | C/T entries in ledger | TODO |
+| Gate chain composition (`decision_pipeline/{models,adapter}.py` + `risk/` Moat #9) | `api/core/brain/gates.py` + `api/core/brain/risk/` | Short-circuit order preserved; compliance + Art.12 audit are optional Batch 5 seams; action_kind is opaque str | PORTED |
+| T1+T2 node_runtime/node_factory hooks | per CLAUDE.md | T1 live (2 markers, BRAIN_GATES_MODE off/observe/enforce + outcome capture); T2 needed no edit (factory already constructs the hooked runtime) | PORTED |
+| T3 agent_v2 context+gate injection | per CLAUDE.md | `cendra_brain_layer.py` + one marked block in `agent_node._run`: gate at run start + episodic run recording; prompt-context injection lands with Batch 5 per-tenant store wiring | PORTED |
+| T6 brain memory as retrieval source | per CLAUDE.md | **DECIDED (Batch 4): zero-edit external-knowledge loopback** — smaller rebase surface, in-cluster latency acceptable; retrieval endpoint ships with the Batch 5 service layer | DECIDED — endpoint Batch 5 |
+| T7 DecisionCase capture on run events | per CLAUDE.md | `callback_handler/cendra_decision_capture.py`: deterministic case_id (idempotent), conversation_id join key, calibration feed; invoked from the T1 stream wrapper | PORTED |
+| T8 docker/env | per CLAUDE.md | `envs/core-services/brain.env.example` + marked env_file entries; everything defaults off (upstream-identical) | PORTED |
 
 ## Batch 5 — Policy, compliance, scheduled jobs, public API
 

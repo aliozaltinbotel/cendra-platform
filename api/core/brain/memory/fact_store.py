@@ -367,9 +367,7 @@ class FactStore:
 
         qdrant_filter = None
         if filters:
-            conditions: list[Condition] = [
-                FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()
-            ]
+            conditions: list[Condition] = [FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()]
             qdrant_filter = Filter(must=conditions)
 
         results = client.search(
