@@ -11,6 +11,9 @@ x-shared-api-worker-config: &shared-api-worker-config
       required: false
     - path: ./envs/core-services/api.env
       required: false
+    # CENDRA-HOOK(T8): Cendra brain env (see envs/core-services/brain.env.example)
+    - path: ./envs/core-services/brain.env
+      required: false
     - path: ./envs/security.env
       required: false
     - path: ./envs/databases/db-postgres.env

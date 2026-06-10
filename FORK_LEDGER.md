@@ -21,14 +21,14 @@ The single source of truth for how this fork diverges from upstream `langgenius/
 
 | ID | File | Marker count | Reason | PR | Last rebase verified |
 |----|------|-------------|--------|----|---------------------|
-| T1 | `api/core/workflow/node_runtime.py` | 0 (not yet landed) | Gate chain around tool dispatch | — | — |
-| T2 | `api/core/workflow/node_factory.py` | 0 | Register wrapped runtimes | — | — |
-| T3 | `api/core/workflow/nodes/agent_v2/…` | 0 | Gate + memory injection in agent loop | — | — |
+| T1 | `api/core/workflow/node_runtime.py` | 2 | Gate chain around tool dispatch (BRAIN_GATES_MODE, default off) + outcome-capture stream wrapper | #4 | — |
+| T2 | `api/core/workflow/node_factory.py` | 0 | No edit needed: the factory already constructs the runtime T1 hooks; row retained in case wrapped runtimes become necessary | #4 | — |
+| T3 | `api/core/workflow/nodes/agent_v2/…` | 2 | `cendra_brain_layer.py` (new file in registered dir) + one block in `agent_node._run`; prompt-context injection activates with Batch 5 store wiring | #4 | — |
 | T4 | `api/core/moderation/…` (target: zero-edit Extensible module) | 0 | Art. 50 disclosure + PII | — | — |
 | T5 | `api/extensions/ext_celery.py` | 0 | Additive beat_schedule entries | — | — |
-| T6 | `api/core/rag/retrieval/…` (or zero-edit loopback) | 0 | Brain memory as retrieval source | — | — |
-| T7 | `api/core/callback_handler/…` | 0 | DecisionCase capture on run events | — | — |
-| T8 | `docker/**` env/compose | 0 | Qdrant sparse vectors, brain env | — | — |
+| T6 | zero-edit external-knowledge loopback (**decided Batch 4**: smaller rebase surface; in-cluster HTTP latency acceptable) | 0 by design | Brain memory served to knowledge nodes through Dify's External Knowledge Base API; the retrieval endpoint lands with the Batch 5 service layer at `api/controllers/service_api/brain/` (additive) | #4 | — |
+| T7 | `api/core/callback_handler/cendra_decision_capture.py` (new file in registered dir) | 1 | Idempotent DecisionCase capture + calibration feed on tool completion; conversation_id is the join key; invoked from the T1 stream wrapper | #4 | — |
+| T8 | `docker/envs/core-services/brain.env.example` (new) + 1 marked env_file entry in compose template + generated compose | 3 | BRAIN_* env surface (gates mode/tenants, embedding pod, hybrid retrieval flag); Qdrant sparse-vector collections are created code-side when hybrid is enabled | #4 | — |
 
 Every hooked block in code: `# CENDRA-HOOK(Tn): <reason>`. Rule: `git grep -c "CENDRA-HOOK"` totals must match this table.
 

@@ -500,6 +500,23 @@ class DifyToolNodeRuntime(ToolNodeRuntimeProtocol):
         elif hasattr(tool, "clear_trace_session_id"):
             tool.clear_trace_session_id()
 
+        # CENDRA-HOOK(T1): gate chain around tool dispatch — BRAIN_GATES_MODE
+        # off (default) keeps upstream behaviour; observe logs verdicts only;
+        # enforce refuses non-PROCEED dispatches. See core/brain/gates.py,
+        # core/brain/runtime_gateway.py and FORK_LEDGER.md.
+        from core.brain.runtime_gateway import evaluate_tool_dispatch
+
+        brain_decision = evaluate_tool_dispatch(
+            tenant_id=self._run_context.tenant_id,
+            app_id=self._run_context.app_id,
+            tool_id=tool.entity.identity.name,
+            conversation_id=runtime_binding.conversation_id,
+        )
+        if brain_decision is not None and brain_decision.verdict.value != "proceed":
+            raise ToolRuntimeInvocationError(
+                f"refused by Cendra brain gates ({brain_decision.verdict.value}): {brain_decision.rationale}"
+            )
+
         try:
             messages = ToolEngine.generic_invoke(
                 tool=tool,
@@ -520,7 +537,24 @@ class DifyToolNodeRuntime(ToolNodeRuntimeProtocol):
             conversation_id=runtime_binding.conversation_id,
         )
 
-        return self._adapt_messages(transformed_messages, provider_name=provider_name)
+        # CENDRA-HOOK(T1): outcome capture — streams through unchanged and,
+        # when gating is active, records the dispatch outcome via the T7
+        # capture module (DecisionCase + calibration). See FORK_LEDGER.md.
+        from core.callback_handler.cendra_decision_capture import instrument_tool_messages
+
+        return instrument_tool_messages(
+            self._adapt_messages(transformed_messages, provider_name=provider_name),
+            tenant_id=self._run_context.tenant_id,
+            app_id=self._run_context.app_id,
+            tool_id=tool.entity.identity.name,
+            conversation_id=runtime_binding.conversation_id,
+            # deterministic across retries of the same logical dispatch:
+            # identical (conversation, tool, params, depth) collapses to one
+            # captured case — the idempotent-ingest contract (T7).
+            dispatch_key=(
+                f"{workflow_call_depth}:{hash(frozenset((str(k), str(v)) for k, v in tool_parameters.items()))}"
+            ),
+        )
 
     @override
     def get_usage(
