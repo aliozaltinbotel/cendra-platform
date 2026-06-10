@@ -6,11 +6,11 @@ Source of truth for what moves where, in which batch, and its status. Source pat
 
 | Source | Target | Notes | Status |
 |---|---|---|---|
-| `patterns/wilson.py` | `api/core/brain/patterns/wilson.py` | Pure math | TODO |
-| `abstention/` (models, calibrator, split_conformal, protocols, gate) | `api/core/brain/abstention/` | Pure; `mapie_calibrator.py` only if `uv add mapie` is clean, else DEFERRED | TODO |
-| `certificates/` (tier, cert, policy, issuer, verifier) | `api/core/brain/certificates/` | Pure; HMAC key via dify_config/secret | TODO |
-| `cognition_loops/{models,protocol,critic,friction}.py` | `api/core/brain/cognition/` | Pure; ACE×Memory-R1 protocol + Reflexion friction | TODO |
-| `epistemic/{models,promotion}.py` + in-memory store | `api/core/brain/epistemic/` | Postgres store is Batch 2 | TODO |
+| `patterns/wilson.py` | `api/core/brain/patterns/wilson.py` | Pure math; reference docstring examples were wrong, fixed forward | PORTED |
+| `abstention/` (models, calibrator, split_conformal, protocols, gate, mapie_calibrator) | `api/core/brain/abstention/` | Pure; `uv add mapie` was clean (mapie 1.4.1 + scikit-learn + scipy, BSD-3) so the MAPIE path shipped too | PORTED |
+| `certificates/` (tier, cert, policy, issuer, verifier) | `api/core/brain/certificates/` | Pure; HMAC key via dify_config (Batch 5 wiring). **Genericised**: action kinds are opaque str — `cards/action_kinds.py` (hospitality vocabulary) was NOT ported; tier ceilings extracted to `packs/hospitality/tier_defaults.yaml`; TierPolicy/Verifier take explicit mappings | PORTED |
+| `cognition_loops/{models,protocol,critic,friction}.py` | `api/core/brain/cognition/` | Pure; ACE×Memory-R1 protocol + Reflexion friction. `RewardSimulator` Protocol inlined into `friction.py` (grpo.py is Batch 6 and must import it back) | PORTED |
+| `epistemic/{models,promotion}.py` + in-memory store | `api/core/brain/epistemic/` | Postgres store is Batch 2 | PORTED |
 
 ## Batch 2 — Stores, models, migrations (runtime still untouched)
 
