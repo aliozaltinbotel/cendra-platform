@@ -28,7 +28,6 @@ from __future__ import annotations
 from math import sqrt
 from typing import Final
 
-
 # Common z-scores for one-sided upper tail probabilities.  95 % ≈ 1.96
 # (two-sided) is the convention used across the Brain Engine promotion
 # gates; callers who need tighter bounds can pass ``z`` explicitly.
