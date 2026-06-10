@@ -14,7 +14,11 @@ api = ExternalApi(
 
 service_api_ns = Namespace("service_api", description="Service operations", path="/")
 
-from . import index
+# CENDRA C6: register the additive brain controller package (FORK_LEDGER.md)
+from . import (
+    brain,  # noqa: F401
+    index,
+)
 from .app import (
     annotation,
     app,

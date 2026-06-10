@@ -193,7 +193,6 @@ class ComplianceMonitor:
         """Run every check and return the aggregate verdict."""
         moment = at or datetime.now()
         if moment.tzinfo is None:
-
             moment = moment.replace(tzinfo=UTC)
         violations: list[ComplianceViolation] = []
         for check in self._checks:

@@ -22,11 +22,12 @@ only — never the bytes.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import os
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, override
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,7 @@ class KeyHandle:
         if len(self.key_bytes) < 16:
             raise ValueError("KeyHandle.key_bytes must be ≥ 16 bytes")
 
+    @override
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"KeyHandle(kid={self.kid!r})"
 
@@ -130,7 +132,7 @@ class EnvKeyProvider:
             )
         try:
             master = base64.b64decode(raw, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
+        except (ValueError, binascii.Error) as exc:
             raise RuntimeError(
                 f"{self._env_var} must be base64-encoded bytes",
             ) from exc

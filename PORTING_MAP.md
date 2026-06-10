@@ -50,10 +50,10 @@ Source of truth for what moves where, in which batch, and its status. Source pat
 
 | Source | Target | Notes | Status |
 |---|---|---|---|
-| `owner_policy/` (grammar.lark, parser, ast, compiler, z3_compiler, registry) | `api/core/brain/policy/` | `lark`, `z3-solver` deps; registry → SQLAlchemy; keep `internet-drafts/` spec in `docs/` | TODO |
-| `compliance/` (art12, art50, pii_detector, redactor, consent, retention, never_ai_denylist, encryption) | `api/core/brain/compliance/` + T4 moderation module | Key Vault → pluggable secret provider | TODO |
-| T5 beat schedule entries | `api/extensions/ext_celery.py` | consolidation, mining, autonomy eval, friction decay | TODO |
-| TrustMeter / policy / audit endpoints | `api/services/brain_*.py` + `api/controllers/{console,service_api}/brain/` | API-first, before any UI | TODO |
+| `owner_policy/` (grammar.lark, parser, ast, compiler, z3_compiler, registry) + planner styles/registry value objects → `planning/` | `api/core/brain/policy/` + `api/core/brain/planning/` | lark+z3-solver added (MIT); spec at docs/; action kinds opaque str (parser permissive — vocabulary validation at save time); documents persist in `brain_owner_policies` | PORTED |
+| `compliance/` (full package incl. checks/monitor/audit/reg_2024_1028/data_subject_rights) | `api/core/brain/compliance/` + T4 `core/moderation/cendra_brain/` (zero-edit builtin extension) | Monitor wired into the gate chain's first slot; HASH redaction awaits per-tenant secret provider; T4 = Art.50 disclosure + PII mask | PORTED |
+| T5 beat schedule entries | `api/extensions/ext_celery.py` | CENDRA-HOOK(T5): four entries, active only when BRAIN_GATES_MODE != off; mining/eval/decay tasks log-and-skip until per-tenant wiring | PORTED |
+| TrustMeter / policy / audit endpoints | `api/services/brain_governance_service.py` + `api/controllers/service_api/brain/` (+ T6 retrieval endpoint) | API-first done on service_api (C6 import line — see ledger); console controllers ride Batch 6 with the UI | PORTED (service_api) |
 
 ## Batch 6 — Learning live, console, packs
 

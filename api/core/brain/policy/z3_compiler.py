@@ -293,7 +293,6 @@ class Z3OwnerPolicyVerifier:
                     constraint.op.value,
                     constraint.value,
                     candidate,
-                    z3_check="unsat",
                 )
                 return OwnerVerifyResult(
                     outcome=(OwnerVerifyOutcome.NUMERIC_VIOLATION),
