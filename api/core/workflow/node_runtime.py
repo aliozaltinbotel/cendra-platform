@@ -500,6 +500,23 @@ class DifyToolNodeRuntime(ToolNodeRuntimeProtocol):
         elif hasattr(tool, "clear_trace_session_id"):
             tool.clear_trace_session_id()
 
+        # CENDRA-HOOK(T1): gate chain around tool dispatch — BRAIN_GATES_MODE
+        # off (default) keeps upstream behaviour; observe logs verdicts only;
+        # enforce refuses non-PROCEED dispatches. See core/brain/gates.py,
+        # core/brain/runtime_gateway.py and FORK_LEDGER.md.
+        from core.brain.runtime_gateway import evaluate_tool_dispatch
+
+        brain_decision = evaluate_tool_dispatch(
+            tenant_id=self._run_context.tenant_id,
+            app_id=self._run_context.app_id,
+            tool_id=tool.entity.identity.name,
+            conversation_id=runtime_binding.conversation_id,
+        )
+        if brain_decision is not None and brain_decision.verdict.value != "proceed":
+            raise ToolRuntimeInvocationError(
+                f"refused by Cendra brain gates ({brain_decision.verdict.value}): {brain_decision.rationale}"
+            )
+
         try:
             messages = ToolEngine.generic_invoke(
                 tool=tool,
