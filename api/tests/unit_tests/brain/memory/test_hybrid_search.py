@@ -250,5 +250,5 @@ def test_fused_item_is_frozen() -> None:
         key_of=lambda d: d.doc_id,
     )
     item: FusedItem[_Doc] = fused[0]
-    with pytest.raises(Exception):
+    with pytest.raises((AttributeError, TypeError)):
         item.score = 999.0  # type: ignore[misc]

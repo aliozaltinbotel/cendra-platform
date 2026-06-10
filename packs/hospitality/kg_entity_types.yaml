@@ -1,0 +1,3 @@
+# Hospitality pack — knowledge-graph entity-type vocabulary.
+# (Reference EntityType enum, genericised in Batch 3; loader Batch 6.)
+entity_types: [guest, property, cleaner, booking, incident, claim]
