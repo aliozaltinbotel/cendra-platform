@@ -28,12 +28,12 @@ Source of truth for what moves where, in which batch, and its status. Source pat
 
 | Source | Target | Notes | Status |
 |---|---|---|---|
-| `memory/working_memory.py`, `episodic_memory.py`, `episodic_dedup.py` | `api/core/brain/memory/` | Redis via Dify's redis extension; keep `conv:{property}:{guest}` keyspace for migration | TODO |
-| `memory/semantic_memory.py`, `embedding_config.py` | `api/core/brain/memory/semantic.py` | Reuse existing Qdrant collections via Dify qdrant client (`core/rag/datasource/vdb`) | TODO |
-| `memory/hybrid_search.py` (BM25 sparse + RRF) | `api/core/brain/memory/hybrid.py` | `fastembed` dep; flag `BRAIN_HYBRID_RETRIEVAL_ENABLED`; Qdrant named sparse vectors (T8 config) | TODO |
-| `memory/knowledge_graph.py`, `kg_as_of.py` | `api/core/brain/memory/kg.py` | pgvector backend exists in Dify | TODO |
-| `memory/surprise_detector.py`, `memory_consolidator.py`, `recency_decay.py`, `contradiction_detector.py` | `api/core/brain/memory/` + `api/tasks/brain_consolidation.py` | Consolidator → Celery beat (T5, Batch 4/5) | TODO |
-| `memory/mem0_extractor.py` | — | EVALUATE: keep `mem0ai` dep or replace with llm_generator extraction | TODO |
+| `memory/working_memory.py`, `episodic_memory.py`, `episodic_dedup.py` (+ `tenant.py` helper) | `api/core/brain/memory/` | Sync redis client injectable (Dify ext_redis plugs in); reference keyspaces preserved (`brain:episodic:`, `brain:kg:`, `brain:surprise:`); the `conv:` keyspace belongs to the retired conversation shell, not these tiers | PORTED |
+| `memory/semantic_memory.py`, `embedding_config.py` (+ `fact_store.py` dep) | `api/core/brain/memory/` | Sync QdrantClient injectable (Dify 1.9 pin — query_points→search); **embeddings via separate pod** per session decision: Embedder Protocol + RemoteEmbedder (OpenAI-compatible, BRAIN_EMBEDDING_ENDPOINT/_API_KEY) — no sentence-transformers in image | PORTED |
+| `memory/hybrid_search.py` (BM25 sparse + RRF) | `api/core/brain/memory/hybrid_search.py` | fastembed 0.8.0 added (lazy import); flag `BRAIN_HYBRID_RETRIEVAL_ENABLED`; Qdrant named sparse vectors stay T8 config | PORTED |
+| `memory/knowledge_graph.py`, `kg_as_of.py` | `api/core/brain/memory/` | Redis-backed bi-temporal KG (sync client injectable); EntityType enum genericised to str (packs/hospitality/kg_entity_types.yaml); pgvector store remains a later wiring option | PORTED |
+| `memory/surprise_detector.py`, `memory_consolidator.py`, `recency_decay.py`, `contradiction_detector.py` | `api/core/brain/memory/` + `api/tasks/brain_consolidation.py` (no-op stub until T5) | Consolidator entity extraction + contradiction LLM behind injectable completion seams (litellm retired); beat entry is T5 (Batch 5) | PORTED |
+| `memory/mem0_extractor.py` | `api/core/brain/memory/fact_extraction.py` | **REPLACED** per session decision: value objects + FactExtractor Protocol kept; LLMFactExtractor prompts/parses over an injectable completion callable (Dify llm_generator adapter lands Batch 4/5); mem0ai never added | PORTED |
 
 ## Batch 4 — Runtime wiring (touchpoints T1–T3, T6–T8)
 
