@@ -211,7 +211,7 @@ class ValidationContext:
             marked contaminated (default 0.5 = half).
     """
 
-    manual_forbidden_actions: Mapping[Scenario, frozenset[DecisionType]] = field(default_factory=dict)
+    manual_forbidden_actions: Mapping[str, frozenset[DecisionType]] = field(default_factory=dict)
     active_blocker_actions: frozenset[DecisionType] = frozenset()
     property_constraints: Mapping[str, Any] = field(default_factory=dict)
     dynamic_field_names: frozenset[str] = frozenset()

@@ -138,6 +138,7 @@ class NightlyConsolidator:
         rule_store: PatternRuleStore | None = None,
         pattern_extractor: PatternExtractor | None = None,
         pattern_validator: PatternValidator | None = None,
+        scenarios: tuple[str, ...] = (),
         golden_cases_runner: GoldenCasesRunner | None = None,
         dedup_consolidator: EpisodicDedupConsolidator | None = None,
         contradiction_detector: ContradictionDetector | None = None,
@@ -154,6 +155,7 @@ class NightlyConsolidator:
         self._rule_store = rule_store
         self._pattern_extractor = pattern_extractor
         self._pattern_validator = pattern_validator or PatternValidator()
+        self._scenarios = scenarios
         self._golden_cases_runner = golden_cases_runner
         self._dedup_consolidator = dedup_consolidator
         self._contradiction_detector = contradiction_detector
@@ -497,7 +499,7 @@ class NightlyConsolidator:
                 detection = self._contradiction_detector.check(
                     new_content=fact.content,
                     property_id=fact.entity_id,
-                    new_timestamp=fact.created_at.isoformat() if fact.created_at else "",
+                    new_timestamp=str(fact.created_at) if fact.created_at else "",
                 )
             except Exception:
                 logger.warning(
@@ -997,13 +999,13 @@ class NightlyConsolidator:
                     else:
                         logger.debug(
                             "Rule rejected: scenario=%s, reasons=%s",
-                            rule.scenario.value,
+                            rule.scenario,
                             validation.reasons,
                         )
             except Exception:
                 logger.warning(
                     "Pattern extraction failed for %s/%s",
-                    scenario.value,
+                    scenario,
                     property_id,
                     exc_info=True,
                 )
@@ -1088,18 +1090,23 @@ class NightlyConsolidator:
 
     def _collect_extraction_scopes(
         self,
-    ) -> list[tuple[Scenario, str, str]]:
+    ) -> list[tuple[str, str, str]]:
         """Collect distinct (scenario, property_id, owner_id) tuples to process.
 
         Queries the case store for all non-GENERAL scenarios that have
         at least 3 cases (minimum for pattern extraction).
 
         Returns:
-            List of (Scenario, property_id, owner_id) tuples.
+            List of (scenario, property_id, owner_id) tuples.
         """
-        scopes: list[tuple[Scenario, str, str]] = []
+        scopes: list[tuple[str, str, str]] = []
 
-        for scenario in Scenario:
+        # Genericised: the kernel no longer enumerates a Scenario enum —
+        # the scan iterates the vertical pack's vocabulary (injected via
+        # the constructor's `scenarios`; empty -> nothing to extract).
+        if self._case_store is None:
+            return scopes
+        for scenario in self._scenarios:
             if scenario == "general":
                 continue
 

@@ -63,7 +63,6 @@ __all__ = [
     "FoundationUpdateCandidate",
     "FoundationUpdateStore",
     "InMemoryFoundationUpdateStore",
-    "PgFoundationUpdateStore",
     "UpdateSeverity",
     "detect_foundation_drift",
 ]

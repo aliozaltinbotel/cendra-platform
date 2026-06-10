@@ -42,6 +42,7 @@ Every hooked block in code: `# CENDRA-HOOK(Tn): <reason>`. Rule: `git grep -c "C
 | C4 | `Makefile` | Add `fork-drift` target (additive) | Batch 1 |
 | C5 | `CLAUDE.md` | Replaced with Cendra version; upstream copy moved to `docs/upstream-CLAUDE.md` | Batch 1 |
 | C6 | `api/controllers/service_api/__init__.py` | **One additive import line** registering the additive `service_api/brain` package (T6 retrieval, TrustMeter, policies, audit). Route registration of additive packages — flagged for review: if more controller surfaces need registration in Batch 6 (console), discuss whether this becomes a numbered touchpoint | Batch 5 |
+| C7 | `api/controllers/console/__init__.py` | One additive import line registering the additive console `brain` package (TrustMeter / policies / audit for the web UI). Same pattern as C6 — both flagged: consider a single registration touchpoint if more surfaces appear | Batch 6 |
 
 ## Rebase log
 
@@ -69,7 +70,7 @@ REGISTERED+='|api/core/workflow/nodes/agent_v2/|api/core/moderation/'
 REGISTERED+='|api/extensions/ext_celery.py|api/core/rag/retrieval/'
 REGISTERED+='|api/core/callback_handler/|docker/'
 REGISTERED+='|api/pyproject.toml|api/uv.lock|api/.ruff.toml|.dockerignore|Makefile|api/.importlinter'
-REGISTERED+='|api/controllers/service_api/__init__.py)'   # keep in sync with T/C tables
+REGISTERED+='|api/controllers/service_api/__init__.py|api/controllers/console/__init__.py)'   # keep in sync with T/C tables
 
 VIOLATIONS=$(git diff --name-only "$BASE"..HEAD \
   | grep -Ev "$ALLOW" \

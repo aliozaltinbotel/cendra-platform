@@ -77,7 +77,7 @@ class LLMJudge:
         """
         if self._completion is None:
             logger.debug("LLM judge skipped — no completion seam wired")
-            return EvalResult(passed=False, score=0.0, rationale="no judge LLM wired")
+            return EvalResult(score=0.0, value="N", reasoning="no judge LLM wired")
         try:
             text = self._completion(f"{self._system_prompt}\n\n{prompt}") or ""
             return _parse_response(text)

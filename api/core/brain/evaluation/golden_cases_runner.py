@@ -200,8 +200,8 @@ class GoldenCasesRunner:
         return (
             f"Guest message: {case.message_text}\n"
             f"Property: {case.property_id}\n"
-            f"Scenario: {case.scenario.value}\n"
-            f"Stage: {case.stage.value}"
+            f"Scenario: {case.scenario}\n"
+            f"Stage: {case.stage}"
         )
 
     @staticmethod

@@ -214,8 +214,8 @@ class DeterministicKGSync:
                 relation_type="involved_in_case",
                 properties={
                     "case_id": case.case_id,
-                    "scenario": case.scenario.value,
-                    "stage": case.stage.value,
+                    "scenario": case.scenario,
+                    "stage": case.stage,
                 },
                 confidence=_DETERMINISTIC_CONFIDENCE,
                 event_time=event_time,
@@ -313,7 +313,7 @@ def _event_time(case: DecisionCase) -> str:
         return ""
     isoformat = getattr(created_at, "isoformat", None)
     if callable(isoformat):
-        return isoformat()
+        return str(isoformat())
     return str(created_at)
 
 

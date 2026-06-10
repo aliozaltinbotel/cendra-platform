@@ -314,7 +314,7 @@ class AdaptiveAutonomyManager:
                 _MIN_WILSON_FOR_L4,
             ),
         }
-        min_decisions, min_wilson = thresholds.get(current, (999, 1.0))
+        min_decisions, min_wilson = thresholds.get(AutonomyLevel(current)) or (999, 1.0)
 
         return {
             "decisions_needed": max(0, min_decisions - state.total_decisions),
