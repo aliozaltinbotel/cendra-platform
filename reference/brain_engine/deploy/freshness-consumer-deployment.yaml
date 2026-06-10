@@ -1,0 +1,58 @@
+# Always-on consumer turning backend ``botel-*-sync`` events into refreshes.
+#
+# Stage 3 Track A (reactive freshness). Subscribes to the backend sync
+# topics (subscription ``brain-engine-cascade``), marks primed properties
+# stale, and enqueues small-window refresh intents onto the Stage 2
+# ``bootstrap-intents`` queue, which bootstrap-worker drains.
+#
+# Standalone Deployment (NOT part of the shared golden Helm chart, which
+# is single-process). The CI dev stage rewrites ``image`` to the API's
+# freshly built tag (see azure-pipelines.yml) so the consumer tracks the
+# same image as the API on every dev deploy.
+#
+# Far lighter than bootstrap-worker: per-event work is one Postgres update
+# plus one queue send (no bootstrap pipeline runs in this process).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: freshness-consumer
+  namespace: dev
+  labels:
+    app: freshness-consumer
+    component: stage3-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: freshness-consumer
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: freshness-consumer
+        component: stage3-consumer
+    spec:
+      imagePullSecrets:
+        - name: acr-secret
+      containers:
+        - name: consumer
+          # Tag MUST match the live brain-engine image (CI rewrites it
+          # to the API's freshly built tag via the same sed as the
+          # bootstrap worker). Repo is ``brainengine`` (no hyphen) so the
+          # pipeline's ``brainengine:`` sed pattern matches.
+          image: "booklycontainer.azurecr.io/brainengine:dev-12425"
+          imagePullPolicy: Always
+          command: ["python", "-m", "workers.freshness_consumer"]
+          envFrom:
+            - secretRef:
+                name: brain-engine-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          ports: []
+      restartPolicy: Always

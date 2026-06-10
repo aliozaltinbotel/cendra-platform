@@ -1,0 +1,119 @@
+# ── API & Server ──
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+httpx>=0.27.0
+python-multipart>=0.0.9
+aiofiles>=24.0.0
+
+# ── LLM ──
+openai>=1.50.0
+litellm>=1.40.0
+
+# ── Data ──
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+python-dotenv>=1.0.0
+jinja2>=3.1.0
+pyyaml>=6.0.0
+structlog>=24.0.0
+
+# ── Databases ──
+redis>=5.0.0
+aiosqlite>=0.20.0
+asyncpg>=0.30.0
+qdrant-client>=1.12.0
+# SQLAlchemy 2.0 async + asyncmy power both the conversation
+# checkpointer (cendra-pg) and the read-only Botel/Bookly.Pms
+# integration (brain_engine.integrations.botel_pms).
+sqlalchemy>=2.0.0
+asyncmy>=0.2.10
+
+# ── AI/ML ──
+sentence-transformers>=3.0.0
+# Sprint C — local BM25 sparse encoder for hybrid (dense + sparse)
+# retrieval in Qdrant 1.10+.  Lazy-imported by
+# brain_engine/memory/hybrid_search.py only when
+# BRAIN_HYBRID_RETRIEVAL_ENABLED is truthy, so pods that have not
+# opted in pay zero startup cost.
+fastembed>=0.4.0
+# Sprint E — DecisionTreeClassifier + feature_importance for the
+# ML-augmented pattern miner.  Lazy-imported by
+# brain_engine/patterns/ml_synthesizer.py only when
+# BRAIN_ML_SYNTHESIZER_ENABLED is truthy.
+scikit-learn>=1.4.0
+
+# ── Voice (optional) ──
+elevenlabs>=1.0.0
+
+# ── Memory ──
+mem0ai>=0.1.0
+# graphiti-core retired 2026-04-29 — adapter shell stays disabled at the
+# factory level (see brain_engine/memory/factory.py:_build_graphiti_adapter).
+# The cendra-pg memory layer covers V1 needs without the per-episode
+# 5–10 LLM-call cost of graphiti.
+
+# ── Messaging ──
+azure-servicebus>=7.12.0
+
+# ── Scheduling ──
+apscheduler>=3.10.0
+
+# ── Testing ──
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+pytest-benchmark>=4.0.0
+# Hard wall-clock cap per test to prevent the dev pipeline from
+# hanging on hypothesis shrinkers or async-fixture leaks.  Combined
+# with the pyproject pytest options (--timeout=120 default, thread
+# method) this turns a hung test into a per-test failure within 2 m.
+pytest-timeout>=2.3.0
+hypothesis>=6.115.0
+coverage[toml]>=7.6.0
+radon>=6.0.0
+
+# ── Observability ──
+prometheus_client>=0.21.0
+# Langfuse trace UI for LLM call replay — wired into BaseChatModel.invoke
+# via brain_engine/observability/langfuse_client.py.  Tracer stays
+# disabled (no-op spans) when LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+# env vars are unset, so the dependency is safe to land before keys
+# are issued in the AKS deployment.
+langfuse>=2.0,<3.0
+
+# ── Compliance / security ──
+# AES-GCM at-rest encryption (brain_engine.compliance.encryption).
+cryptography>=43.0.0
+# Lazy-imported by KeyVaultSecretProvider; absence raises a clear
+# RuntimeError instead of silently falling back to env reads.
+azure-identity>=1.19.0
+azure-keyvault-secrets>=4.9.0
+
+# ── Owner-policy DSL (Moat #2) ──
+# Pure-Python parser used by brain_engine.owner_policy to compile
+# tenant-defined policy documents into PlannerStyleSpec records.
+# Lazy-imported only when an owner uploads a DSL document, so pods
+# without owner-policy traffic pay zero startup cost.
+lark>=1.2.0
+# Z3 SMT solver — Moat #22 owner-policy verifier
+# (brain_engine/owner_policy/z3_compiler.py).  Lazy-imported inside
+# the verifier constructor so pods that never run owner-policy
+# verification pay zero startup cost.  Apache 2.0.
+z3-solver>=4.16
+# MAPIE — library-backed split-conformal prediction; refines M1
+# abstention via brain_engine/abstention/mapie_calibrator.py.  BSD
+# 3-Clause.  Lazy-imported so pods using the pure-Python
+# split_conformal default pay zero startup cost.
+mapie>=1.4.0
+# py_trees — Behavior Tree primitives for the reactive composition
+# layer brain_engine/behavior_trees/ wires on top of the HTN /
+# LATS deliberative stack.  Apache 2.0.  Imported only when the
+# caller builds a BT explicitly; pods running only the deliberative
+# planner pay zero startup cost.
+py_trees>=2.3
+# lingua-language-detector — Layer 1 of the intelligent classifier.
+# Offline n-gram language detection (~50 MB pretrained), no API
+# calls, sub-ms per query after warm-up.  Apache 2.0.  Retires the
+# hand-curated multilingual keyword tables in
+# brain_engine/patterns/classifier.py.
+lingua-language-detector>=2.1.0

@@ -1,0 +1,34 @@
+[
+  {
+    "property_id": "OCEANA-001",
+    "name": "Oceana Apartments",
+    "address": "Oceana Apartments, Istanbul",
+    "city": "Istanbul",
+    "country": "TR",
+    "pms_user": {
+      "name": "Can",
+      "phone": "+905323633771",
+      "telegram_chat_id": "6512154486",
+      "role": "property_manager"
+    },
+    "property_access": {
+      "wifi_name": "oval",
+      "wifi_password": "istanbul",
+      "building_door_code": "**9403",
+      "lockbox_code": "3852"
+    },
+    "check_in_time": "15:00",
+    "check_out_time": "11:00",
+    "early_checkin_fee": 25,
+    "late_checkout_fee": 30,
+    "max_guests": 6,
+    "cleaners": ["cleaner-aybuke", "cleaner-efe", "cleaner-mumin"],
+    "vendors": ["vendor-elektrik", "vendor-tesisat"],
+    "house_rules": [
+      "No smoking inside",
+      "No parties",
+      "Quiet hours 23:00-08:00",
+      "Maximum 6 guests"
+    ]
+  }
+]

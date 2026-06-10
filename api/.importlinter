@@ -12,3 +12,15 @@ root_packages =
     tasks
     services
 include_external_packages = True
+
+; Cendra (C3 in FORK_LEDGER.md): the brain kernel imports nothing from the
+; orchestration chassis — adapters at the touchpoints import brain, never the reverse.
+[importlinter:contract:brain-kernel-isolation]
+name = Cendra brain kernel isolation
+type = forbidden
+source_modules =
+    core.brain
+forbidden_modules =
+    core.workflow
+    core.app
+    core.agent

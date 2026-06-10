@@ -1,0 +1,122 @@
+# Brain Engine — single source of truth for tooling configuration.
+#
+# Runtime dependencies live in requirements.txt because the pipeline
+# installs them with pip into the Docker layer; pyproject.toml here
+# does NOT take over packaging — it only configures the test, lint,
+# type-check and coverage tools so every contributor (and CI) reads
+# the same knobs.
+#
+# Per-module coverage thresholds intentionally vary: safety-critical
+# modules (guardrails, approval, blockers, auth) demand near-total
+# coverage, while in-flux scaffolding (interview, integrations) gets
+# a softer floor.  Every threshold is a lower bound — values higher
+# than the floor are encouraged and never blocked.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brain-engine"
+version = "0.1.0"
+description = "Brain Engine — autonomous ops layer for STR property managers."
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+# ── pytest ───────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+]
+markers = [
+    "slow: tests that hit network or take >1s",
+    "integration: requires live cendra-pg / Redis / Qdrant",
+    "azure: requires Azure OpenAI credentials",
+    "chaos: chaos / fault-injection scenarios (nightly only)",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:google.*",
+    "ignore::DeprecationWarning:pydantic.*",
+]
+
+# ── coverage ─────────────────────────────────────────────────────────────
+[tool.coverage.run]
+branch = true
+source = ["brain_engine", "api_server"]
+omit = [
+    "*/tests/*",
+    "*/__main__.py",
+    "*/migrations/*",
+    "brain_engine/integrations/botel_pms/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "\\.\\.\\.",
+]
+
+# ── black ────────────────────────────────────────────────────────────────
+[tool.black]
+line-length = 79
+target-version = ["py311"]
+
+# ── ruff ─────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+extend-exclude = ["brain_engine.zip", "tests.zip", "BotelOnboarding.zip"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "UP",   # pyupgrade
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # handled by formatter
+    "B008",   # FastAPI Depends pattern
+    "SIM108", # ternary not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]  # pytest assertions ok
+"**/__init__.py" = ["F401"]  # re-exports
+
+# ── mypy ─────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+no_implicit_optional = true
+ignore_missing_imports = true
+files = ["brain_engine", "api_server"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+ignore_errors = true

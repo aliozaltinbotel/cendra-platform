@@ -1,0 +1,27 @@
+.git
+.github
+.claude
+venv
+__pycache__
+*.pyc
+*.pyo
+tests
+docs
+data
+*.md
+# Foundation Layer ground truth — read at startup by foundation_registry,
+# scenario_matcher, intelligent_classifier_factory and the rule_creation
+# workflow.  Mirrors the matching .gitignore exception so the build
+# context actually carries the file before COPY in the Dockerfile.
+!Cendra_Brain_Engine_Hospitality_Scenario_Pattern_Learning_Foundation.md
+*.zip
+*.svg
+*.html
+*.pem
+docker-compose.yml
+nginx.conf
+kubernetes
+infra
+deploy
+langchain_docs_scraper.py
+langchain_full_docs.md

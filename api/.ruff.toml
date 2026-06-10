@@ -2,6 +2,8 @@ exclude = [
     "migrations/*",
     ".git",
     ".git/**",
+    # Cendra: read-only porting reference (repo root), defensively excluded (C1 in FORK_LEDGER.md)
+    "reference",
 ]
 line-length = 120
 

@@ -1,0 +1,81 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "§10 priority-chain — tier hits / minute",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum by (tier) (rate(brain_orchestrator_tier_hits_total[1m])) * 60",
+          "legendFormat": "{{tier}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Decision modes / minute",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum by (mode) (rate(brain_orchestrator_decision_modes_total[1m])) * 60",
+          "legendFormat": "{{mode}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Auto-resolution share (%)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 9},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(brain_orchestrator_decision_modes_total{mode=\"auto\"}[5m])) / clamp_min(sum(rate(brain_orchestrator_decision_modes_total[5m])), 0.0001) * 100",
+          "legendFormat": "auto",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "max": 100, "min": 0}, "overrides": []}
+    },
+    {
+      "title": "Tier hit distribution (last 1h)",
+      "type": "piechart",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 9},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum by (tier) (increase(brain_orchestrator_tier_hits_total[1h]))",
+          "legendFormat": "{{tier}}",
+          "refId": "A"
+        }
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "legend": {"placement": "right"}}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["brain-engine", "orchestrator"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Brain Engine — Orchestrator §10",
+  "uid": "brain-orchestrator",
+  "version": 1,
+  "weekStart": ""
+}

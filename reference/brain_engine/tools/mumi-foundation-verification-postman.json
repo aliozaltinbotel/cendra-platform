@@ -1,0 +1,337 @@
+{
+  "info": {
+    "_postman_id": "f7d8c3e1-2b4a-4c8e-9d0f-1a2b3c4d5e6f",
+    "name": "Brain Engine — Mümin Foundation Layer Verification",
+    "description": "Mümin için Foundation Layer doğrulama akışı.\n\n## Hızlı başlangıç\n1. Bu JSON'u Postman'a import et.\n2. Variables zaten ön ayarlı; gerekirse environment'a kopyala.\n3. Klasörleri 0 → 4 sırayla çalıştır. rule_id + job_id otomatik kaydedilir.\n\n## Akış\n  0. Health\n  1. Foundation katalog aktif mi (scenarios + rules)\n  2. Live mesaj akışı (orchestrator tetikleme)\n  3. Provenance trail (FL-12)\n  4. Re-bootstrap → foundation-aware re-mining → trail dolu\n\nDetay: tools/MUMI-FOUNDATION-VERIFICATION-TR.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "base_url", "value": "https://brain-engine-dev.botel.ai"},
+    {"key": "property_id", "value": "323133"},
+    {"key": "customer_id", "value": "customer-1"},
+    {"key": "rule_id", "value": ""},
+    {"key": "job_id", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "0. Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"]},
+            "description": "Pod canlı + brain_engine_ready=true + memory_system=true mü?"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "pm.test('brain_engine_ready', () => pm.expect(j.brain_engine_ready).to.equal(true));",
+                "pm.test('memory_system', () => pm.expect(j.memory_system).to.equal(true));",
+                "console.log('version:', j.version);"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "1. Foundation katalogu aktif mi",
+      "item": [
+        {
+          "name": "GET /api/v1/patterns/scenarios?scope_id={{property_id}}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/scenarios?scope_id={{property_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "scenarios"],
+              "query": [{"key": "scope_id", "value": "{{property_id}}"}]
+            },
+            "description": "Property uzerinde kullanilan senaryolari listeler. En az 1 scenario olmali."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "pm.test('scenarios array', () => pm.expect(j.scenarios).to.be.an('array'));",
+                "console.log('total scenarios used on property:', j.total);"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /api/v1/patterns/rules?scope=property&scope_id={{property_id}}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules?scope=property&scope_id={{property_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "rules"],
+              "query": [
+                {"key": "scope", "value": "property"},
+                {"key": "scope_id", "value": "{{property_id}}"}
+              ]
+            },
+            "description": "Property icin aktif PatternRule listesi. Ilk rule'un pattern_id'si rule_id variable'ina yazilir."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "pm.test('rules array', () => pm.expect(j.rules).to.be.an('array'));",
+                "if (j.rules && j.rules.length > 0) {",
+                "  pm.collectionVariables.set('rule_id', j.rules[0].pattern_id);",
+                "  console.log('first rule_id saved:', j.rules[0].pattern_id, 'scenario:', j.rules[0].scenario);",
+                "} else {",
+                "  console.log('NO RULES — run folder 4 to bootstrap mining');",
+                "}"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "2. Live mesaj akisi (orchestrator tetikleme)",
+      "item": [
+        {
+          "name": "POST /conversations — early check-in",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"property_id\": \"{{property_id}}\",\n  \"reservation_id\": \"test-foundation-001\",\n  \"messages\": [\n    {\n      \"text\": \"Merhaba, erken check-in mumkun mu? Saat 12:00'de gelmek istiyoruz.\",\n      \"sender_type\": \"guest\"\n    }\n  ],\n  \"guest_name\": \"Mumin-Test\",\n  \"channel\": \"whatsapp\"\n}"
+            },
+            "url": {"raw": "{{base_url}}/api/v1/conversations", "host": ["{{base_url}}"], "path": ["api", "v1", "conversations"]},
+            "description": "Erken check-in mesaji. Beklenen dominant slug: s1_16_early_checkin civari.\n\nArka planda: W1 orchestrator calisir, state.foundation_analysis doldurur, response degismez."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "console.log('ai_response:', (j.message || '').slice(0, 120));",
+                "if (j.business_flags) console.log('business_flags:', Object.keys(j.business_flags).filter(k => j.business_flags[k]).join(', '));"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "POST /conversations — gaz kokusu (kritik senaryo)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"property_id\": \"{{property_id}}\",\n  \"reservation_id\": \"test-foundation-002\",\n  \"messages\": [\n    {\n      \"text\": \"Mutfakta gaz kokusu var, ne yapmaliyim?\",\n      \"sender_type\": \"guest\"\n    }\n  ],\n  \"guest_name\": \"Mumin-Test-Critical\",\n  \"channel\": \"whatsapp\"\n}"
+            },
+            "url": {"raw": "{{base_url}}/api/v1/conversations", "host": ["{{base_url}}"], "path": ["api", "v1", "conversations"]},
+            "description": "Kritik guvenlik senaryosu. Beklenen dominant slug: s4_209_gas_smell. W3 flag'i KAPALI oldugu icin auto-reply hala calisir; guardrail sadece state'e yazilir."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "console.log('ai_response (gas):', (j.message || '').slice(0, 120));"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "POST /conversations — gec check-out",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"property_id\": \"{{property_id}}\",\n  \"reservation_id\": \"test-foundation-003\",\n  \"messages\": [\n    {\n      \"text\": \"Yarin saat 14:00'e kadar kalabilir miyiz?\",\n      \"sender_type\": \"guest\"\n    }\n  ],\n  \"guest_name\": \"Mumin-Test-Late\",\n  \"channel\": \"whatsapp\"\n}"
+            },
+            "url": {"raw": "{{base_url}}/api/v1/conversations", "host": ["{{base_url}}"], "path": ["api", "v1", "conversations"]},
+            "description": "Gec check-out talebi. Beklenen dominant slug: late_checkout ailesi."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "console.log('ai_response (late):', (j.message || '').slice(0, 120));"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "3. Provenance trail (FL-12)",
+      "item": [
+        {
+          "name": "GET /api/v1/patterns/rules/{{rule_id}}/origin",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules/{{rule_id}}/origin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "rules", "{{rule_id}}", "origin"]
+            },
+            "description": "FL-12 provenance endpoint. rule_id otomatik (Klasor 1.b). Eski rule: foundation_scenarios bos. Klasor 4'ten sonra yeniden cagir, dolu olmali."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "console.log('rule_id:', j.rule_id);",
+                "console.log('foundation_scenario_id:', j.foundation_scenario_id);",
+                "console.log('foundation_scenarios:', JSON.stringify(j.foundation_scenarios));",
+                "console.log('source_event_ids count:', (j.source_event_ids || []).length);",
+                "if (!j.foundation_scenario_id) console.log('NOTE: Eski rule (W1 oncesi). Klasor 4 ile re-mining yap.');"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "4. Re-bootstrap (foundation-aware mining)",
+      "item": [
+        {
+          "name": "POST /onboarding/bootstrap/property/{{property_id}}/async",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{}"},
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap/property/{{property_id}}/async",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "bootstrap", "property", "{{property_id}}", "async"]
+            },
+            "description": "Property'yi re-bootstrap eder. Fresh cases'lerden pattern miner calisir; yeni rule'lar foundation_scenario_id dolu olarak dogar."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                "const j = pm.response.json();",
+                "pm.collectionVariables.set('job_id', j.job_id);",
+                "console.log('job_id saved:', j.job_id);"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /onboarding/bootstrap/{{job_id}} — POLL",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "bootstrap", "{{job_id}}"]
+            },
+            "description": "status=completed olana kadar 5-10sn'de bir gonder."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "console.log('status:', j.status);",
+                "if (j.status === 'completed' && j.report) {",
+                "  console.log('cases_extracted:', j.report.cases_extracted);",
+                "  console.log('rules_emitted:', j.report.rules_emitted);",
+                "  console.log('conversations_loaded:', j.report.conversations_loaded);",
+                "} else if (j.status === 'failed') {",
+                "  console.log('FAILED:', j.error);",
+                "}"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /patterns/rules — yeni rule'lari listele",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules?scope=property&scope_id={{property_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "rules"],
+              "query": [
+                {"key": "scope", "value": "property"},
+                {"key": "scope_id", "value": "{{property_id}}"}
+              ]
+            },
+            "description": "Re-bootstrap sonrasi listede yeni rule'lar olmali. Ilk rule'un pattern_id'si tekrar rule_id'ye yazilir."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "console.log('total rules:', (j.rules || []).length);",
+                "const withFoundation = (j.rules || []).filter(r => r.foundation_scenario_id);",
+                "console.log('rules with foundation_scenario_id:', withFoundation.length);",
+                "if (withFoundation.length > 0) {",
+                "  pm.collectionVariables.set('rule_id', withFoundation[0].pattern_id);",
+                "  console.log('rule_id saved (with foundation):', withFoundation[0].pattern_id, 'foundation:', withFoundation[0].foundation_scenario_id);",
+                "}"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /patterns/rules/{{rule_id}}/origin — yeni trail",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules/{{rule_id}}/origin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "rules", "{{rule_id}}", "origin"]
+            },
+            "description": "Yeni rule'un provenance trail'i. foundation_scenarios array'i DOLU olmali."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const j = pm.response.json();",
+                "pm.test('foundation_scenario_id populated', () => pm.expect(j.foundation_scenario_id).to.not.be.null);",
+                "pm.test('foundation_scenarios non-empty', () => pm.expect(j.foundation_scenarios).to.be.an('array').that.is.not.empty);",
+                "console.log('foundation_scenario_id:', j.foundation_scenario_id);",
+                "console.log('foundation_scenarios:', JSON.stringify(j.foundation_scenarios));",
+                "console.log('source_event_ids count:', (j.source_event_ids || []).length);"
+              ]
+            }
+          }]
+        }
+      ]
+    }
+  ]
+}

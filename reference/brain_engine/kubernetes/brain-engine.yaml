@@ -1,0 +1,177 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: brain-engine
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: brain-engine-secrets
+  namespace: brain-engine
+type: Opaque
+stringData:
+  AZURE_OPENAI_ENDPOINT: "https://cendra-ai.openai.azure.com/"
+  AZURE_OPENAI_API_KEY: "REPLACE_ME"
+  REDIS_URL: "rediss://cendra-redis.redis.cache.windows.net:6380"
+  QDRANT_URL: "https://cendra.cloud.qdrant.io:6333"
+  QDRANT_API_KEY: "REPLACE_ME"
+  DATABASE_URL: "postgresql://brain_engine:REPLACE_ME@cendra-pg.postgres.database.azure.com/brain_engine"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: brain-engine
+  namespace: brain-engine
+  labels:
+    app: brain-engine
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: brain-engine
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: brain-engine
+        version: v1
+      annotations:
+        # Picked up by the prometheus scrape config in
+        # kubernetes/observability/10-prometheus.yaml.  The scraper
+        # only follows pods that opt-in via these annotations so a
+        # missing prometheus deployment cannot affect this pod.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: brain-engine
+        image: cendra.azurecr.io/brain-engine:latest
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        envFrom:
+        - secretRef:
+            name: brain-engine-secrets
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: WORKERS
+          value: "4"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 12
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: brain-engine
+  namespace: brain-engine
+  labels:
+    app: brain-engine
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: brain-engine
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: brain-engine-ingress
+  namespace: brain-engine
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+spec:
+  tls:
+  - hosts:
+    - brain.cendra.ai
+    secretName: brain-engine-tls
+  rules:
+  - host: brain.cendra.ai
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: brain-engine
+            port:
+              number: 8000
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: brain-engine-hpa
+  namespace: brain-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: brain-engine
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

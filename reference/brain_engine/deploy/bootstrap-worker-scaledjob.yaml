@@ -1,0 +1,151 @@
+# Stage 2 bootstrap worker — KEDA ScaledJob (AKS, namespace `dev`).
+#
+# OPTIONAL / FUTURE runtime. KEDA is NOT installed on the shared dev
+# AKS as of 2026-05-29 (`scaledjobs.keda.sh` CRD absent), so the ACTIVE
+# runtime is the always-on Deployment in
+# `deploy/bootstrap-worker-deployment.yaml`. Apply THIS manifest only
+# after KEDA is installed cluster-wide (a conscious DevOps decision on
+# a prod-shared cluster); do NOT run both manifests at once.
+#
+# Set BOOTSTRAP_WORKER_CONTINUOUS=false here so the worker drains the
+# queue once and exits, letting each KEDA job complete.
+#
+# Drains the `bootstrap-intents` Service Bus queue produced by the
+# Stage 2 dispatcher (PR #347) and runs `bootstrap_fast` out of the
+# request path.  Same container image as the API, different command
+# (`python -m workers.bootstrap_worker`); the worker process exits
+# once the queue goes idle so each job completes and KEDA spins a
+# fresh one when the backlog grows.
+#
+# ─────────────────────────────────────────────────────────────────
+# TEMPLATE — reconcile before first apply.  Three prerequisites are
+# tracked outside this repo (see project memory `stage2-producer`):
+#   1. Queue `bootstrap-intents` must exist in namespace
+#      `booklyservicebus` with duplicate-detection + dead-lettering.
+#   2. KEDA must be installed on the dev AKS cluster
+#      (`kubectl get crd scaledjobs.keda.sh`).
+#   3. The worker pod needs the SAME env the API Deployment gets.
+#      The chart inlines env today; mirror the sensitive values into
+#      a Secret (`brain-engine-secrets`) and the non-sensitive ones
+#      into a ConfigMap (`brain-engine-config`), then keep both in
+#      sync with `deploy/brain-engine-dev.yaml`.  At minimum the
+#      worker reads: DATABASE_URL, REDIS_URL, QDRANT_URL,
+#      AZURE_SERVICEBUS_CONNECTION_STRING, the *_STORE_BACKEND knobs,
+#      SANDBOX_GENERATOR_BACKEND + AZURE_OPENAI_* and the
+#      UNIFIED_DATA_* trio (else the archive loader stays disabled).
+#
+# Apply:    kubectl apply -f deploy/bootstrap-worker-scaledjob.yaml -n dev
+# Inspect:  kubectl get scaledjob bootstrap-worker -n dev
+#           kubectl get jobs -n dev -l app.kubernetes.io/name=bootstrap-worker
+# ─────────────────────────────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: bootstrap-worker
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: bootstrap-worker
+    app.kubernetes.io/part-of: brain-engine
+    app.kubernetes.io/component: worker
+spec:
+  # Poll the queue length every 20s; scale 0→N jobs with the backlog.
+  pollingInterval: 20
+  maxReplicaCount: 5
+  # Keep a little history for post-mortems without unbounded growth.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  # Each message that survives `maxDeliveryCount` redeliveries lands
+  # in the queue's dead-letter sub-queue (configured on the queue,
+  # not here); `backoffLimit` bounds in-pod crashes per job.
+  jobTargetRef:
+    parallelism: 1
+    completions: 1
+    backoffLimit: 3
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: bootstrap-worker
+          app.kubernetes.io/part-of: brain-engine
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: bootstrap-worker
+            # Pinned to the live API/worker tag — ACR has no ``:latest``
+            # (CI-managed tags), so ``:latest`` would ImagePullBackOff.
+            # Keep in sync with the API Deployment / bootstrap-worker
+            # Deployment tag on each release (proper fix: template from
+            # the Helm chart — same follow-up the Deployment notes).
+            image: "booklycontainer.azurecr.io/brainengine:dev-12673"
+            imagePullPolicy: Always
+            command: ["python", "-m", "workers.bootstrap_worker"]
+            envFrom:
+              # Mirror of the API Deployment env (see prerequisite 3).
+              - configMapRef:
+                  name: brain-engine-config
+                  optional: true
+              - secretRef:
+                  name: brain-engine-secrets
+                  optional: true
+            env:
+              # Drain-then-exit so each KEDA job completes.
+              - name: BOOTSTRAP_WORKER_CONTINUOUS
+                value: "false"
+              # Worker-specific knobs (safe defaults; tune per load).
+              - name: BOOTSTRAP_WORKER_MAX_MESSAGES
+                value: "50"
+              - name: BOOTSTRAP_WORKER_RECEIVE_BATCH
+                value: "1"
+              - name: BOOTSTRAP_WORKER_MAX_WAIT_SECONDS
+                value: "5"
+              - name: BOOTSTRAP_WORKER_MAX_IDLE_RECEIVES
+                value: "1"
+              # The worker always needs the SSoT; force the Postgres
+              # state store on regardless of the API's gating flag.
+              - name: PROPERTY_STATE_ENABLED
+                value: "true"
+              - name: TENANT_REGISTRY_BACKEND
+                value: "postgres"
+              # Elasticsearch property enrichment.  The worker is the
+              # real harvest path under BOOTSTRAP_QUEUE_ENABLED and does
+              # NOT read the API's `brain-engine` ConfigMap (the
+              # `brain-engine-config` envFrom above is optional and does
+              # not exist), so the flag + endpoint are forced inline here
+              # — the same pattern as PROPERTY_STATE_ENABLED above.  The
+              # read-only API key flows from `brain-engine-secrets` via
+              # the secretRef envFrom (value set out-of-band, never in git).
+              - name: ES_ENRICHMENT_ENABLED
+                value: "1"
+              - name: ELASTICSEARCH_ENDPOINT
+                value: "https://elasticsearch-cluster-es-http.elasticsearch.svc:9200"
+              # The worker BUILDS + WRITES the PropertyProfile during
+              # harvest; it must persist to cendra-pg, not its own
+              # InMemory store (the os.getenv default in
+              # workers/bootstrap_deps.py). Parity with the bootstrap
+              # Deployment — without this, a KEDA-run harvest writes the
+              # profile to the job pod's RAM, it's lost when the job
+              # exits, and the agent defers every property answer.
+              - name: PROPERTY_PROFILE_STORE_BACKEND
+                value: "postgres"
+            # Bootstrap is memory-heavy (foundation scenarios +
+            # transformer weights + conversation archive + LLM) — the
+            # same reason the always-on Deployment runs 4Gi. The earlier
+            # 1Gi limit OOMKilled the harvest mid-run (property left
+            # stuck in `warming`, never `primed`), so match the
+            # Deployment's envelope exactly.
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "2Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        queueName: "bootstrap-intents"
+        # Target one running job per pending message (clamped by
+        # maxReplicaCount) so a backlog drains in parallel.
+        messageCount: "1"
+        # KEDA resolves the namespace connection string from the
+        # job template env injected above.
+        connectionFromEnv: "AZURE_SERVICEBUS_CONNECTION_STRING"

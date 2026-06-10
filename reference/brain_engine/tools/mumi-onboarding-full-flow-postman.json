@@ -1,0 +1,543 @@
+{
+  "info": {
+    "_postman_id": "b4e6d3c2-8f9a-4b0d-c7e3-6f9d2a0b5c4e",
+    "name": "Brain Engine — Mümin Full Onboarding Flow (E2E)",
+    "description": "Mümin için tam onboarding bootstrap test akışı — boş body ile tüm arşivi yükle, audit-log ile dökümünü gör, persistence'ı doğrula.\n\n## Hızlı başlangıç\n1. Bu JSON'u Postman'a import et.\n2. Environment oluştur:\n     base_url    = https://brain-engine-dev.botel.ai\n     property_id = 323133\n3. Klasörleri 0→6 sırayla çalıştır. job_id otomatik kaydedilir.\n\n## Akış\n  0. Health\n  1. Bootstrap (Live — persistence ON)\n  2. Audit Log — breakdown\n  3. Verify Cases — DB'de gerçekten yazıldı mı\n  4. Verify Rules — pattern mining sonucu\n  5. Property Profile — rate plans, knowledge, unanswered\n  6. Batch — birden çok property\n\nHer adımın Tests script'i kritik field'ları console'a yazar — debug için aç.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "base_url", "value": "https://brain-engine-dev.botel.ai"},
+    {"key": "property_id", "value": "323133"},
+    {"key": "job_id", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "0. Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Pod ayakta mı + brain_engine_ready=true mu?"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "pm.test('brain engine ready', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.status).to.equal('healthy');",
+                "  pm.expect(j.brain_engine_ready).to.equal(true);",
+                "});"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "1. Bootstrap (Live — persistence ON)",
+      "item": [
+        {
+          "name": "POST /async — boş body (TÜM arşivi persist et)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{}"},
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap/property/{{property_id}}/async",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "bootstrap", "property", "{{property_id}}", "async"]
+            },
+            "description": "Boş body = tüm arşiv (PR #252). Pipeline 10 yıl × 100k cap'a kadar her şeyi getirir, case extract eder, pattern miner çalıştırır, profile harvest yapar.\n\nresponse: 202 + job_id (otomatik kaydedilir)."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                "const body = pm.response.json();",
+                "pm.test('job_id alındı', () => pm.expect(body.job_id).to.have.lengthOf(32));",
+                "pm.collectionVariables.set('job_id', body.job_id);",
+                "console.log('job_id:', body.job_id);"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "POST /async — sadece test (dry_run=true)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"dry_run\": true, \"mine_patterns\": false}"},
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap/property/{{property_id}}/async",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "bootstrap", "property", "{{property_id}}", "async"]
+            },
+            "description": "Pipeline'ı çalıştır ama HİÇBİR ŞEY persist etme. Sadece sayıları görmek için. Mining'i de kapatır (daha hızlı)."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('job_id', body.job_id);",
+                "console.log('dry-run job_id:', body.job_id);"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /bootstrap/{job_id} — durumu öğren (poll)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "bootstrap", "{{job_id}}"]
+            },
+            "description": "status='completed' olana kadar 5-10 sn'de bir tekrar gönder. PR #253 sayesinde her pod 404 vermeden cevap verir."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "pm.test('status geçerli', () => pm.expect(['pending','running','completed','failed','cancelled']).to.include(body.status));",
+                "console.log('status:', body.status);",
+                "if (body.status === 'completed' && body.report) {",
+                "  console.log('────── Bootstrap Report ──────');",
+                "  console.log('conversations_loaded:', body.report.conversations_loaded);",
+                "  console.log('cases_extracted:', body.report.cases_extracted);",
+                "  console.log('cases_skipped:', body.report.cases_skipped);",
+                "  console.log('rules_emitted:', body.report.rules_emitted);",
+                "  console.log('profile_built:', body.report.profile_built);",
+                "  console.log('loader_truncated:', body.report.loader_truncated);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ],
+      "description": "Mümin'in ana akışı. POST → job_id al → GET ile poll et."
+    },
+    {
+      "name": "2. Audit Log — Breakdown",
+      "item": [
+        {
+          "name": "GET /jobs/{job_id} — toplu özet + skip_breakdown",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "jobs", "{{job_id}}"]
+            },
+            "description": "Mümin'in ANA dökümü. counts + skip_breakdown + rule_block_breakdown verir.\n\nÖrnek skip_breakdown 323133 için:\n  no_guest_message: 510 (%90)\n  no_pm_response_after_guest: 21 (%9)\n  empty_thread: 6 (%1)"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log('════ Mümin Özet ════');",
+                "console.log('status:', body.status);",
+                "console.log('counts:', JSON.stringify(body.counts, null, 2));",
+                "console.log('skip_breakdown:', JSON.stringify(body.skip_breakdown, null, 2));",
+                "console.log('rule_block_breakdown:', JSON.stringify(body.rule_block_breakdown, null, 2));"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /jobs/{job_id}/log — son 100 event",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/jobs/{{job_id}}/log?since=0&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "jobs", "{{job_id}}", "log"],
+              "query": [
+                {"key": "since", "value": "0"},
+                {"key": "limit", "value": "100"}
+              ]
+            },
+            "description": "Tüm event'leri ham JSON olarak ver. since=cursor (pagination), limit=1-1000."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log(`${body.returned} event döndü.`);",
+                "const kinds = {};",
+                "for (const e of body.events) {",
+                "  kinds[e.kind] = (kinds[e.kind] || 0) + 1;",
+                "}",
+                "console.log('event kind dağılımı:', JSON.stringify(kinds, null, 2));"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /jobs/{job_id}/log?kind=conversation_skipped",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/jobs/{{job_id}}/log?limit=1000&kind=conversation_skipped",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "jobs", "{{job_id}}", "log"],
+              "query": [
+                {"key": "limit", "value": "1000"},
+                {"key": "kind", "value": "conversation_skipped"}
+              ]
+            },
+            "description": "Hangi conversation'lar neden atlandı. Her event payload'unda reason + conversation_id var."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "const reasons = {};",
+                "for (const e of body.events) {",
+                "  const r = e.payload.reason || 'unknown';",
+                "  reasons[r] = (reasons[r] || 0) + 1;",
+                "}",
+                "console.log('skip reason dağılımı:', JSON.stringify(reasons, null, 2));",
+                "if (body.events.length > 0) {",
+                "  console.log('Örnek conversation_id (ilk skip):', body.events[0].payload.conversation_id);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /jobs/{job_id}/log?kind=case_extracted",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/jobs/{{job_id}}/log?limit=1000&kind=case_extracted",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "jobs", "{{job_id}}", "log"],
+              "query": [
+                {"key": "limit", "value": "1000"},
+                {"key": "kind", "value": "case_extracted"}
+              ]
+            },
+            "description": "Başarıyla case'e dönüşen thread'ler — scenario + decision_type ile birlikte."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "const scenarios = {};",
+                "const decisions = {};",
+                "for (const e of body.events) {",
+                "  const s = e.payload.scenario || 'unknown';",
+                "  const d = e.payload.decision_type || 'unknown';",
+                "  scenarios[s] = (scenarios[s] || 0) + 1;",
+                "  decisions[d] = (decisions[d] || 0) + 1;",
+                "}",
+                "console.log(`${body.returned} case extracted.`);",
+                "console.log('scenario:', JSON.stringify(scenarios, null, 2));",
+                "console.log('decision_type:', JSON.stringify(decisions, null, 2));"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ],
+      "description": "Bootstrap çalıştıktan SONRA dökümünü görmek için. job_id otomatik dolu olur."
+    },
+    {
+      "name": "3. Verify Cases (DB'de gerçekten yazıldı mı)",
+      "item": [
+        {
+          "name": "POST /patterns/cases — bu property'nin tüm case'leri",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"property_id\": \"{{property_id}}\",\n  \"limit\": 100,\n  \"offset\": 0\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/cases",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "cases"]
+            },
+            "description": "Bootstrap sonrası bu property için DecisionCase'lerin gerçekten yazılıp yazılmadığını doğrula.\n\nResponse'da `total` = bu property'nin DB'deki toplam case sayısı (filtered). Bootstrap'ın `cases_extracted` sayısıyla yaklaşık eşleşmeli."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log('total cases in DB:', body.total);",
+                "console.log('returned page:', body.cases.length);",
+                "if (body.cases.length > 0) {",
+                "  console.log('İlk case scenario:', body.cases[0].scenario);",
+                "  console.log('İlk case stage:', body.cases[0].stage);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "POST /patterns/cases?scenario=access_code_release",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"property_id\": \"{{property_id}}\",\n  \"scenario\": \"access_code_release\",\n  \"limit\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/cases",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "cases"]
+            },
+            "description": "Belirli bir scenario için case'leri filtrele. `scenario` alanına geçerli enum değeri ver: access_code_release, early_checkin, late_checkout, cancellation_request, vb."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log(`access_code_release case sayısı: ${body.total}`);"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ],
+      "description": "Bootstrap'ın gerçekten DB'ye yazıp yazmadığını doğrulamak için."
+    },
+    {
+      "name": "4. Verify Rules (Pattern Mining Sonucu)",
+      "item": [
+        {
+          "name": "GET /patterns/rules — aktif rule'lar",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/rules?scope=property&scope_id={{property_id}}&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "rules"],
+              "query": [
+                {"key": "scope", "value": "property"},
+                {"key": "scope_id", "value": "{{property_id}}"},
+                {"key": "limit", "value": "100"}
+              ]
+            },
+            "description": "Bu property için pattern miner ne öğrendi — confidence + support_count ile.\n\nDikkat: rule'lar `mine_patterns: true` ile bootstrap çağrıldığında üretilir. Default'ta bunu açıyoruz; dry_run mode'da kapatabilirsin."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log(`active rules: ${body.total}`);",
+                "for (const r of body.rules.slice(0, 5)) {",
+                "  console.log(`  ${r.scenario} → ${r.action.action_type} (conf=${r.confidence.toFixed(2)}, support=${r.support_count})`);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /patterns/scenarios — hangi senaryolarda rule var",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/patterns/scenarios?scope=property&scope_id={{property_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "patterns", "scenarios"],
+              "query": [
+                {"key": "scope", "value": "property"},
+                {"key": "scope_id", "value": "{{property_id}}"}
+              ]
+            },
+            "description": "Hangi senaryoda kaç rule var — özet."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log('scenarios with rules:');",
+                "for (const s of body.scenarios || []) {",
+                "  console.log(`  ${s.scenario}: ${s.rule_count} rules`);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ],
+      "description": "Pattern miner'ın ürettiği rule'ları doğrulamak için. mine_patterns=true ile bootstrap çağrılmış olmalı."
+    },
+    {
+      "name": "5. Property Profile",
+      "item": [
+        {
+          "name": "GET /properties — tüm property'ler",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "properties"]
+            },
+            "description": "Bootstrap çalıştırılmış property'lerin listesi."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log(`properties: ${(body.properties || []).length}`);",
+                "for (const p of (body.properties || []).slice(0, 5)) {",
+                "  console.log(`  ${p.property_id}: ${p.name || '-'}`);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /properties/{property_id}/rate-plans",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties/{{property_id}}/rate-plans",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "properties", "{{property_id}}", "rate-plans"]
+            },
+            "description": "Bootstrap'ın profile_harvester ile çektiği rate plan'ler."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log('rate plans:', (body.rate_plans || []).length);"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /properties/{property_id}/knowledge",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties/{{property_id}}/knowledge",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "properties", "{{property_id}}", "knowledge"]
+            },
+            "description": "Property'nin öğrenilmiş bilgileri (foundation + interview cevapları)."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        },
+        {
+          "name": "GET /properties/{property_id}/unanswered-threads",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/properties/{{property_id}}/unanswered-threads",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "properties", "{{property_id}}", "unanswered-threads"]
+            },
+            "description": "Bootstrap'ın `no_pm_response_after_guest` ile işaretlediği thread'ler buraya gelir — sandbox example-reply pipeline'ı."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "console.log('unanswered threads:', (body.threads || []).length);"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ],
+      "description": "Bootstrap'ın yan ürünleri: rate plans, property knowledge, unanswered threads."
+    },
+    {
+      "name": "6. Batch (Birden Çok Property)",
+      "item": [
+        {
+          "name": "POST /onboarding/bootstrap — N property tek job",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"property_ids\": [\n    \"323133\",\n    \"218126\",\n    \"214217\",\n    \"166647\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/onboarding/bootstrap",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "onboarding", "bootstrap"]
+            },
+            "description": "Birden çok property tek seferde. Boş days/limit = her property için tüm arşiv.\n\nResponse: tek job_id. Sonra Klasör 1.3 (GET) ile poll edilir. Final report `property_reports[]` listesi içerir."
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('job_id', body.job_id);",
+                "console.log('batch job_id:', body.job_id);"
+              ],
+              "type": "text/javascript"
+            }
+          }]
+        }
+      ],
+      "description": "Tek job içinde birden çok property bootstrap et."
+    }
+  ]
+}

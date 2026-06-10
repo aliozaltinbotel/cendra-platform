@@ -1,0 +1,27 @@
+# Prometheus scrape configuration for the local brain_engine dev pod.
+#
+# Scrapes the host-side uvicorn process at /metrics every 15s.  When
+# brain_engine moves into AKS the same job_name is reused with a
+# kubernetes_sd_config pointing at the namespace, so dashboards and
+# alerts continue to work without renaming series.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local-dev
+
+scrape_configs:
+  - job_name: brain_engine
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:8000
+        labels:
+          service: brain-engine
+          component: api
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

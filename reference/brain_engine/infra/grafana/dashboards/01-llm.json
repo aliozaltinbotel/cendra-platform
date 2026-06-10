@@ -1,0 +1,86 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "LLM cost (USD/hour) by model",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(brain_llm_cost_usd_total[5m])) * 3600",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "title": "LLM call latency p95 by model (s)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (model, le) (rate(brain_llm_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "title": "Tokens / minute by model",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 9},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(brain_llm_tokens_input_total[1m])) * 60",
+          "legendFormat": "in {{model}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (model) (rate(brain_llm_tokens_output_total[1m])) * 60",
+          "legendFormat": "out {{model}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "LLM errors / minute",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 9},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum by (provider, model) (rate(brain_llm_errors_total[5m])) * 60",
+          "legendFormat": "{{provider}}:{{model}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["brain-engine", "llm"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Brain Engine — LLM",
+  "uid": "brain-llm",
+  "version": 1,
+  "weekStart": ""
+}

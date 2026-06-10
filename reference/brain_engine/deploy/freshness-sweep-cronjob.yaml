@@ -1,0 +1,76 @@
+# Nightly proactive freshness backstop (Stage 3 Track B).
+#
+# Once a night, finds every ``primed`` property whose last warm
+# predates the freshness TTL and enqueues a ``stale_refresh`` onto the
+# Stage 2 ``bootstrap-intents`` queue, which bootstrap-worker drains.
+# The complement to the always-on freshness-consumer (Track A,
+# reactive): the consumer catches properties that still emit
+# ``botel-*-sync`` webhooks; this sweep catches the ones that went
+# quiet or whose webhook never reached the cascade subscription.
+#
+# Run-to-completion CronJob (NOT a Deployment): build deps, sweep once,
+# exit. The schedule is the loop. Same standalone-manifest + image-pin
+# pattern as bootstrap-worker / freshness-consumer — the CI dev stage
+# rewrites ``image`` to the API's freshly built tag (see
+# azure-pipelines.yml) so the sweep tracks the same image as the API.
+#
+# Safe by default: ``FRESHNESS_SWEEP_DRY_RUN`` (from brain-engine-secrets)
+# defaults true, so the first scheduled runs log candidate counts
+# without enqueuing. Flip the secret to ``false`` to go live.
+# ``FRESHNESS_SWEEP_ENABLED=false`` is a kill-switch that needs no
+# CronJob delete.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: freshness-sweep
+  namespace: dev
+  labels:
+    app: freshness-sweep
+    component: stage3-sweep
+spec:
+  # 03:00 UTC daily — off-peak, after the day's reactive refreshes.
+  schedule: "0 3 * * *"
+  # Never overlap runs: a slow sweep must finish before the next fires.
+  concurrencyPolicy: Forbid
+  # A missed tick (control-plane downtime) is fine to skip rather than
+  # backfill — the next night re-selects whatever is still stale.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry on a crash; the sweep is idempotent (request_bootstrap
+      # dedups, and a re-run re-selects the same primed-stale rows).
+      backoffLimit: 1
+      # Hard ceiling so a wedged run cannot hold the Forbid lock forever.
+      activeDeadlineSeconds: 3600
+      # Keep finished Jobs a day for log inspection, then auto-clean.
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: freshness-sweep
+            component: stage3-sweep
+        spec:
+          imagePullSecrets:
+            - name: acr-secret
+          restartPolicy: Never
+          containers:
+            - name: sweep
+              # Tag MUST match the live brain-engine image (CI rewrites
+              # it to the API's freshly built tag via the same sed as
+              # the worker/consumer). Repo is ``brainengine`` (no hyphen)
+              # so the pipeline's ``brainengine:`` sed pattern matches.
+              image: "booklycontainer.azurecr.io/brainengine:dev-12425"
+              imagePullPolicy: Always
+              command: ["python", "-m", "workers.freshness_sweep"]
+              envFrom:
+                - secretRef:
+                    name: brain-engine-secrets
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 250m
+                  memory: 512Mi

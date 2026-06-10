@@ -1,0 +1,52 @@
+{
+    "Access Information": {
+        "Inquiry": "D", "Confirmed": "D", "Arriving in 2 Days": "D",
+        "Check-in Tomorrow": "C", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "D", "No Show": "D", "Unknown": "D"
+    },
+    "Reservation Management": {
+        "Inquiry": "P", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "C", "Check-in Today": "C", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "C", "Unknown": "D"
+    },
+    "Financial Information": {
+        "Inquiry": "D", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "P", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "P", "Unknown": "D"
+    },
+    "Property Details": {
+        "Inquiry": "P", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "P", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "P", "Unknown": "P"
+    },
+    "Support & Troubleshooting": {
+        "Inquiry": "D", "Confirmed": "D", "Arriving in 2 Days": "D",
+        "Check-in Tomorrow": "D", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "D", "Unknown": "D"
+    },
+    "Local Information": {
+        "Inquiry": "P", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "P", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "P", "Unknown": "P"
+    },
+    "Policies": {
+        "Inquiry": "P", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "P", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "P", "Unknown": "D"
+    },
+    "Personal Data & Privacy": {
+        "Inquiry": "D", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "P", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "D", "Unknown": "D"
+    },
+    "General Inquiry": {
+        "Inquiry": "P", "Confirmed": "P", "Arriving in 2 Days": "P",
+        "Check-in Tomorrow": "P", "Check-in Today": "P", "Currently Hosting": "P",
+        "Post Stay": "P", "No Show": "P", "Unknown": "D"
+    },
+    "_legend": {
+        "P": "Provide — AI can share this information freely",
+        "C": "Caution — AI can share but with care/conditions",
+        "D": "Deny — AI should NOT share this information"
+    }
+}

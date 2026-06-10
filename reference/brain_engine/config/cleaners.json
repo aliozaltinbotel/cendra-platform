@@ -1,0 +1,41 @@
+[
+  {
+    "contact_id": "cleaner-aybuke",
+    "name": "Aybuke",
+    "phone": "+905318350080",
+    "telegram_chat_id": "8288381246",
+    "available_hours": "8:00-18:00",
+    "rating": 4.8,
+    "specialties": ["deep_clean", "standard", "turnover"],
+    "status": "available",
+    "max_daily_jobs": 4,
+    "properties": ["OCEANA-001"],
+    "language": "tr"
+  },
+  {
+    "contact_id": "cleaner-efe",
+    "name": "Efe",
+    "phone": "+905318350081",
+    "telegram_chat_id": "1974583607",
+    "available_hours": "9:00-19:00",
+    "rating": 4.5,
+    "specialties": ["standard", "turnover"],
+    "status": "available",
+    "max_daily_jobs": 3,
+    "properties": ["OCEANA-001"],
+    "language": "tr"
+  },
+  {
+    "contact_id": "cleaner-mumin",
+    "name": "Mumin",
+    "phone": "+905318350082",
+    "telegram_chat_id": "6570979044",
+    "available_hours": "7:00-17:00",
+    "rating": 4.6,
+    "specialties": ["deep_clean", "standard", "turnover"],
+    "status": "available",
+    "max_daily_jobs": 5,
+    "properties": ["OCEANA-001"],
+    "language": "tr"
+  }
+]

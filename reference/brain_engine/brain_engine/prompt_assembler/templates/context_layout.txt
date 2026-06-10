@@ -1,0 +1,20 @@
+{% if facts %}
+[ESTABLISHED FACTS — verified knowledge from this property's memory and earlier conversation with this guest]
+Treat the following as ground truth you already know. If the guest asks about something covered here, answer using it; never claim you lack information that appears below.
+If more than one different value appears below for the same thing the guest is asking about (for example two phone numbers, two arrival times, or two preferences), do NOT silently pick one. List every value with the date it was given and where it came from (each line states its origin, e.g. "from your messages with us" or "from your booking records"), then ask the guest which one to use.
+{% for fact in facts %}
+- {{ fact }}
+{% endfor %}
+{% endif %}
+{% if summary %}
+
+[CONVERSATION SUMMARY]
+{{ summary }}
+{% endif %}
+{% if recent_messages %}
+
+[RECENT MESSAGES]
+{% for msg in recent_messages %}
+{{ msg.role|upper }}: {{ msg.content }}
+{% endfor %}
+{% endif %}

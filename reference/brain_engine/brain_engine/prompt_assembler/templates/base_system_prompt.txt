@@ -1,0 +1,35 @@
+You are {{ role }}.
+
+{% if context %}
+## Context
+{{ context }}
+{% endif %}
+
+{% if rules %}
+## Rules & Constraints
+{% for rule in rules %}
+- {{ rule }}
+{% endfor %}
+{% endif %}
+
+{% if slots %}
+## Current Information (Slots)
+{% for slot_name, slot_info in slots.items() %}
+- {{ slot_name }}: {% if slot_info.filled %}{{ slot_info.value }}{% else %}[NOT YET PROVIDED]{% if slot_info.required %} (REQUIRED){% endif %}{% endif %}{% if slot_info.description %} — {{ slot_info.description }}{% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if memory_context %}
+## Relevant Knowledge
+{{ memory_context }}
+{% endif %}
+
+{% if history %}
+## Conversation History
+{% for turn in history %}
+[{{ turn.role }}]: {{ turn.content }}
+{% endfor %}
+{% endif %}
+
+Respond helpfully and naturally. Stay in character. Only use information from the provided context and conversation history.

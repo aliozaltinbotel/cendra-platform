@@ -1,0 +1,123 @@
+# ══════════════════════════════════════════════════════════════════════
+# Qdrant — vector database for Brain Engine semantic memory & RAG
+# ══════════════════════════════════════════════════════════════════════
+# Deploys into the same AKS namespace as brain-engine (dev/prod).
+# Brain Engine connects via DNS: qdrant:6333 (gRPC) / qdrant:6334 (REST)
+#
+# Apply:
+#   kubectl apply -f deploy/qdrant.yaml -n dev
+# ══════════════════════════════════════════════════════════════════════
+
+---
+# ClusterIP Service — brain-engine connects here as QDRANT_HOST=qdrant
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  labels:
+    app: qdrant
+    component: vector-db
+spec:
+  type: ClusterIP
+  selector:
+    app: qdrant
+  ports:
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP
+    - name: rest
+      port: 6333
+      targetPort: 6333
+      protocol: TCP
+
+---
+# Headless Service for StatefulSet stable network identity
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-headless
+  labels:
+    app: qdrant
+    component: vector-db
+spec:
+  clusterIP: None
+  selector:
+    app: qdrant
+  ports:
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP
+    - name: rest
+      port: 6333
+      targetPort: 6333
+      protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  labels:
+    app: qdrant
+    component: vector-db
+spec:
+  serviceName: qdrant-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+        component: vector-db
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.17.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: rest
+              containerPort: 6333
+              protocol: TCP
+            - name: grpc
+              containerPort: 6334
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /qdrant/storage
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 6333
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 6333
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi

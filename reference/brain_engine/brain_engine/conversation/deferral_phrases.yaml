@@ -1,0 +1,66 @@
+# Deferral phrases consumed by
+# ``brain_engine.conversation.missing_info_extractor.response_has_deferral``.
+#
+# Each entry is lowercased and substring-matched against the lowercased
+# AI response.  When NONE match, the AI gave a definitive answer and
+# the extractor LLM is NOT called (cost / latency guard) — keep this
+# list short: broad regex catches more false positives than it
+# prevents.
+#
+# Edit and ship without a code change — the loader picks the file up
+# on module import.  Sort by language section, then by surface form
+# so duplicates are easy to spot in review.
+
+english:
+  - "i don't have"
+  - "i do not have"
+  - "i don't have information"
+  - "i don't have knowledge"
+  - "i'll check"
+  - "i will check"
+  - "let me check"
+  - "let me find out"
+  - "get back to you"
+  - "i'll find out"
+  - "not in the knowledge base"
+  - "i'm not sure"
+  - "i am not sure"
+
+turkish:
+  - "üzgünüm"
+  - "elimde bilgi yok"
+  - "kontrol edip"
+  - "kontrol edip size"
+  - "geri döneceğim"
+  - "size geri döneceğim"
+  - "şu anda elimde"
+  - "bilgi yok"
+  - "henüz bilgim yok"
+  - "bilgiye sahip değilim"
+  - "bilgi sahibi değilim"
+  - "bilgim yok"
+  - "bu konuda bilgi"
+  - "emin değilim"
+  - "net bir bilgi"
+  - "kesin bilgi"
+  # Determiner-inserted shapes the LLM emits in the wild — substring
+  # match fails when the AI inserts a determiner like "bir" between
+  # tokens, so the variants are spelled out.
+  - "kesin bir bilgi"
+  - "veremem"
+  - "veremiyorum"
+  - "göremiyorum"
+  - "bilemem"
+  - "bilemiyorum"
+  - "elimde kesin"
+
+russian:
+  - "у меня нет"
+  - "не знаю"
+  - "не уверен"
+  - "уточню"
+  - "уточню и вернусь"
+  - "проверю"
+  - "узнаю и сообщу"
+  - "не располагаю"
+  - "нет информации"

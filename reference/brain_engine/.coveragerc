@@ -1,0 +1,51 @@
+# Per-module coverage gates for Brain Engine.
+#
+# Drives ``coverage report --fail-under`` indirectly through CI:
+# the pipeline runs coverage once and then ``coverage report`` per
+# package below.  Safety-critical paths (guardrails, approval
+# gates, blockers, auth, compliance, cascade memory) ship with
+# near-total coverage; modules still in flux (interview, narrative,
+# integrations) carry a softer floor that we ratchet up as the
+# code stabilises.
+#
+# To run locally (Azure pod or laptop):
+#
+#     coverage run -m pytest
+#     coverage report
+#     scripts/coverage_gates.sh   # enforces the per-package floors
+#
+# CI (.azure-pipelines.yml) wraps the same scripted gate.
+
+[run]
+branch = True
+parallel = True
+source =
+    brain_engine
+    api_server
+omit =
+    */tests/*
+    */__main__.py
+    */migrations/*
+    brain_engine/integrations/botel_pms/*
+
+[paths]
+source =
+    brain_engine
+    /app/brain_engine
+
+[report]
+precision = 2
+show_missing = True
+skip_empty = True
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    \.\.\.
+
+[html]
+directory = .htmlcov
+
+[xml]
+output = coverage.xml

@@ -1,0 +1,113 @@
+# ══════════════════════════════════════════════════════════════════════
+# cendra-pg — CloudNativePG PostgreSQL cluster for Brain Engine
+# ══════════════════════════════════════════════════════════════════════
+# Primary data store for DecisionCase, PatternRule, ZFS blocks,
+# GuestMemory, Interactions, and Hindsight narrative layer.
+#
+# Why CNPG (vs Azure Flexible Server):
+#   - Operator is already installed in the cluster (0 setup cost).
+#   - $0 beyond AKS node resources (vs ~$32/mo managed).
+#   - Pod-to-pod latency <1ms (same VNet, same node AZ).
+#   - Managed HA, failover, continuous backup, PITR via CRDs.
+#
+# Image choice: ghcr.io/tensorchord/cloudnative-vectorchord
+#   Drop-in CNPG-compatible image with pgvector 0.8 + VectorChord
+#   pre-installed. VectorChord adds DiskANN indexing (SOTA for large
+#   vector collections) on top of standard pgvector HNSW. We only use
+#   pgvector features at first; VectorChord is available as upgrade path.
+#
+# Apply once (from Lens → Terminal, or kubectl):
+#   kubectl apply -f deploy/postgres-cluster.yaml -n dev
+#
+# After cluster is Ready (watch `Cluster.status.phase == "Cluster in
+# healthy state"`), CNPG auto-creates these resources:
+#   - Service `cendra-pg-rw`   — read-write, always points to primary
+#   - Service `cendra-pg-ro`   — read-only, replicas (none while replicas=1)
+#   - Service `cendra-pg-r`    — any instance
+#   - Secret  `cendra-pg-app`  — app connection: host/user/password/uri
+#   - Secret  `cendra-pg-superuser` — postgres superuser credentials
+#
+# The brain-engine Deployment reads DATABASE_URL from `cendra-pg-app`
+# (see deploy/brain-engine-dev.yaml) — no manual password handling.
+# ══════════════════════════════════════════════════════════════════════
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cendra-pg
+  namespace: dev
+  labels:
+    app: cendra-pg
+    component: primary-datastore
+    owner: brain-engine
+spec:
+  # Single instance for now. Bump to 3 for HA (1 primary + 2 standby)
+  # once we have real data to protect. CNPG handles failover in 10-30s.
+  instances: 1
+
+  # CNPG-compatible image with pgvector + VectorChord pre-built.
+  # Pin exact tag to avoid silent upgrades during maintenance windows.
+  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:17.5-0.4.3
+
+  # Rolling upgrade strategy — CNPG orchestrates restart of replicas
+  # first, then promotes a standby, then upgrades former primary.
+  primaryUpdateStrategy: unsupervised
+
+  # Storage backed by AKS default StorageClass. If `managed-csi-premium`
+  # is available (SSD), override via storageClass field.
+  storage:
+    size: 32Gi
+    # storageClass: managed-csi-premium  # uncomment if available
+
+  # Resource requests sized for dev workload. Scale up as data grows.
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+  # Bootstrap creates the application database + owner + enables
+  # required extensions on first boot. This block runs exactly once.
+  bootstrap:
+    initdb:
+      database: brain_engine
+      owner: brain_engine
+      encoding: UTF8
+      localeCollate: en_US.utf8
+      localeCType: en_US.utf8
+
+      # Extensions installed into the brain_engine database.
+      # pgvector 0.4+ is marked trusted, so the non-superuser owner
+      # can CREATE EXTENSION directly. pg_trgm and uuid-ossp are
+      # trusted by default.
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+        - CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        - CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+  # PostgreSQL tuning. Sized for B1ms-equivalent workload (2GB RAM).
+  # Scale shared_buffers to ~25% of memory limit, effective_cache_size
+  # to ~75%. max_connections allows comfortable SQLAlchemy pool_size
+  # with overflow across 6 brain-engine replicas.
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      effective_cache_size: "1GB"
+      work_mem: "4MB"
+      maintenance_work_mem: "128MB"
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+      wal_buffers: "16MB"
+      checkpoint_completion_target: "0.9"
+      min_wal_size: "512MB"
+      max_wal_size: "2GB"
+
+  # Prometheus scrape config — picked up automatically if the kube-
+  # prometheus-stack operator is installed (we saw monitoring.coreos.com
+  # CRDs, so likely yes).
+  monitoring:
+    enablePodMonitor: true
