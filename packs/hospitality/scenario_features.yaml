@@ -1,0 +1,33 @@
+# Hospitality pack — per-scenario feature whitelists (Sprint H).
+#
+# Consumed by core.brain.patterns.condition_synthesizer via the
+# scenario-features mechanism (flag: BRAIN_SCENARIO_FEATURES_ENABLED;
+# kernel ships an empty mapping — pack loader lands in Batch 6).
+# Extracted at Batch 2 port time from the reference's
+# patterns/scenario_features.py.
+#
+# Rationale preserved from the reference: the timing-and-occupancy
+# family (access code release, late checkout, early check-in) is gated
+# by where the guest is in the stay and how many people are arriving —
+# money (total_price, currency), channel (source) and confirmation
+# status are spurious correlations of the property's booking mix and
+# are excluded so the synthesiser cannot bake them into a rule.
+# Add entries only when a real complaint or domain expert has flagged
+# spurious features — never invent domain knowledge here.
+
+timing_occupancy_pms_keys: &timing_occupancy
+  - stage
+  - hours_before_checkin
+  - lead_time_hours
+  - adults
+  - children
+  - infants
+  - payment_status
+
+scenario_features:
+  access_code_release:
+    pms_keys: *timing_occupancy
+  late_checkout:
+    pms_keys: *timing_occupancy
+  early_checkin:
+    pms_keys: *timing_occupancy

@@ -1,0 +1,26 @@
+# Hospitality pack — approval routing policy.
+#
+# Consumed by core.brain.autonomy.approval.ApprovalGateway (via
+# ApprovalPolicy) and ConfidenceRouter (never_auto_approve).  The kernel
+# ships empty sets; the pack loader (Batch 6) injects these.  Extracted
+# at Batch 2 port time from the reference's approval/models.py
+# AUTO_APPROVE_ACTIONS / CONDITIONAL_APPROVE_ACTIONS /
+# ALWAYS_REQUIRE_APPROVAL and confidence_router's never-auto default.
+#
+# Reference note preserved: send_access_code was deliberately moved from
+# auto-approve to conditional — access codes must be gated on blockers
+# (guest count confirmed, payment complete, ID verified).
+
+auto_approve_actions:
+  - send_welcome_message
+
+conditional_approve_actions:
+  - send_access_code
+
+always_require_approval:
+  - submit_damage_claim
+  - charge_guest
+
+never_auto_approve:
+  - submit_damage_claim
+  - charge_guest
