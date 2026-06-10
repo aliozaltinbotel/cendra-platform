@@ -1,0 +1,37 @@
+# Hospitality pack — blocker vocabulary and default mappings.
+#
+# Consumed by core.brain.patterns.blockers.BlockerEngine (the kernel
+# ships no blocker vocabulary; these are injected via the engine's
+# default_severity / default_actions params — pack loader lands in
+# Batch 6).  Extracted at Batch 2 port time from the reference's
+# blockers/models.py DEFAULT_BLOCKER_ACTIONS + DEFAULT_SEVERITY.
+#
+# Hard blockers prevent execution; soft blockers trigger warnings.
+# The PMS auto-detection rules (adults==0, payment_status not paid,
+# id_verified false, cleaning_status incomplete) are vertical CODE and
+# wait for the pack-behaviour design in Batch 6; until then they are
+# preserved as the reference detector inside
+# api/tests/unit_tests/brain/patterns/test_blockers.py.
+
+blocker_severity:
+  guest_count_unconfirmed: hard
+  payment_incomplete: hard
+  id_unverified: hard
+  property_not_ready: hard
+  approval_pending: hard
+  ops_unresolved: soft
+  access_data_unverified: hard
+  agreement_unsigned: soft
+  cleaning_incomplete: hard
+  damage_uninspected: soft
+  maintenance_in_progress: soft
+
+blocker_actions:
+  guest_count_unconfirmed: [send_access_code]
+  payment_incomplete: [send_access_code, late_checkout]
+  id_unverified: [send_access_code]
+  property_not_ready: [send_access_code, late_checkout]
+  approval_pending: [charge_guest, submit_damage_claim, offer_discount]
+  cleaning_incomplete: [send_access_code]
+  damage_uninspected: [send_access_code]
+  maintenance_in_progress: [send_access_code, late_checkout]
