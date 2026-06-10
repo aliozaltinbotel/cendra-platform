@@ -20,9 +20,10 @@ Rollout is governed by ``BRAIN_GATES_MODE``:
 comma-separated tenant allowlist (P2: *one* workspace runs
 ``inquiry_reply`` in OBSERVE).
 
-Batch 4 scope: the chain runs certificate-skip + abstention + risk
-(compliance and the Art.12 audit factory are Batch 5 seams — see
-``core/brain/gates.py``).  Calibration evidence lives in a per-process
+Batch 5: the compliance monitor (Reg 2024/1028, GDPR Art. 22, HITL
+and never-AI checks) now occupies the chain's first slot via
+:class:`_MonitorComplianceGate`; the Art.12 audit factory remains a
+follow-up seam.  Calibration evidence lives in a per-process
 :class:`InMemoryCalibrationStore` keyed by tenant; the persistent
 calibration store arrives with the Batch 5 service layer.  Risk samples
 are not available at generic tool dispatch, so the risk gate is
@@ -44,7 +45,15 @@ from core.brain.abstention.gate import AbstentionGate
 from core.brain.abstention.protocols import InMemoryCalibrationStore
 from core.brain.certificates.policy import TierPolicy
 from core.brain.certificates.verifier import CertificateVerifier
-from core.brain.gates import DecisionPipelineAdapter, PipelineDecision, PipelineRequest, PipelineVerdict
+from core.brain.compliance.checks import DEFAULT_BUILTIN_CHECKS
+from core.brain.compliance.monitor import ComplianceContext, ComplianceMonitor
+from core.brain.gates import (
+    ComplianceVerdict,
+    DecisionPipelineAdapter,
+    PipelineDecision,
+    PipelineRequest,
+    PipelineVerdict,
+)
 from core.brain.risk.gate import RiskGate
 
 __all__ = [
@@ -90,15 +99,63 @@ def _tenant_enabled(tenant_id: str) -> bool:
     return tenant_id in allowed
 
 
+class _MonitorComplianceGate:
+    """Adapts the ported ComplianceMonitor to the gates.ComplianceGate seam."""
+
+    def __init__(self) -> None:
+        self._monitor = ComplianceMonitor(checks=DEFAULT_BUILTIN_CHECKS)
+
+    def evaluate(self, request, *, at):
+        verdict = self._monitor.evaluate(
+            ComplianceContext(
+                property_id=request.property_id,
+                owner_id=request.owner_id,
+                action_kind=request.action_kind,
+                jurisdiction=request.jurisdiction,
+                registration_id=request.registration_id,
+                booking_dates=request.booking_dates,
+                is_natural_person_decision=request.is_natural_person_decision,
+                has_human_consent=request.has_human_consent,
+                extra=request.compliance_extra,
+            ),
+            at=at,
+        )
+        # monitor PASS maps to a non-blocking, non-review row
+        kind = verdict.kind.value if verdict.kind.value != "pass" else "ok"
+        return ComplianceVerdict(kind=kind, rationale=verdict.rationale)
+
+
+def _calibration_store_for(tenant_id: str):
+    """Persistent store when the Dify DB is initialised; memory otherwise.
+
+    Batch 5: enforce-mode evidence survives pod restarts.  Unit tests and
+    pre-init code paths fall back to the per-process window.
+    """
+    try:
+        from sqlalchemy.orm import sessionmaker
+
+        from core.brain.abstention.sa_store import SQLAlchemyCalibrationStore
+        from extensions.ext_database import db
+
+        engine = db.engine  # raises outside an initialised Flask app
+        return SQLAlchemyCalibrationStore(
+            session_maker=sessionmaker(bind=engine, expire_on_commit=False),
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        return _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
+
+
 def _adapter_for(tenant_id: str) -> DecisionPipelineAdapter:
     with _lock:
         adapter = _adapters.get(tenant_id)
         if adapter is None:
-            store = _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
+            store = _calibration_store_for(tenant_id)
             adapter = DecisionPipelineAdapter(
                 abstention_gate=AbstentionGate(calibrator=ConformalCalibrator(store=store)),
                 risk_gate=RiskGate(),
                 certificate_verifier=CertificateVerifier(signing_key=_PLACEHOLDER_KEY, policy=TierPolicy()),
+                compliance_gate=_MonitorComplianceGate(),
             )
             _adapters[tenant_id] = adapter
         return adapter
@@ -173,7 +230,7 @@ def record_tool_outcome(
     from core.brain.abstention.models import CalibrationSample
 
     with _lock:
-        store = _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
+        store = _calibration_store_for(tenant_id)
     store.record(
         CalibrationSample.now(
             tool_id=tool_id,

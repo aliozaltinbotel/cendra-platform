@@ -1,0 +1,49 @@
+// Owner-policy DSL grammar.
+//
+// One document carries one or more owner-blocks; each block names
+// the owner, optionally pins a Planner style, sets a jurisdiction,
+// extends the structural denylist with extra action kinds, and
+// declares numeric range constraints (min_nights >= 31,
+// nightly_rate >= 230, etc.) that the Z3 verifier consults.
+//
+// The compiler in compiler.py asserts that every parsed value
+// maps to a known PlannerStyleId / CardActionKind / numeric
+// metric so misconfigurations fail loudly.
+
+start: owner_block+
+
+owner_block: "owner" STRING "{" stmt* "}"
+
+?stmt: style_stmt
+     | jurisdiction_stmt
+     | forbid_stmt
+     | numeric_stmt
+
+style_stmt: "style" "=" CNAME ";"
+jurisdiction_stmt: "jurisdiction" "=" STRING ";"
+forbid_stmt: "forbid" ":" CNAME ("," CNAME)* ";"
+
+// Numeric range constraint:
+//   min_nights >= 31;
+//   nightly_rate >= 230;
+//   max_guests <= 4;
+//
+// Supported metrics: min_nights / max_nights / nightly_rate /
+// max_guests.  Supported operators: >=, >, <=, <, ==.
+numeric_stmt: NUMERIC_METRIC CMP_OP INT ";"
+
+NUMERIC_METRIC: "min_nights"
+              | "max_nights"
+              | "nightly_rate"
+              | "max_guests"
+
+CMP_OP: ">=" | "<=" | "==" | ">" | "<"
+
+%import common.CNAME
+%import common.ESCAPED_STRING -> STRING
+%import common.INT
+%import common.WS
+%ignore WS
+
+COMMENT: /\/\/[^\n]*/
+%ignore COMMENT

@@ -1,0 +1,533 @@
+
+
+
+
+Network Working Group                                       D. Ataoglu
+Internet-Draft                                                  Cendra
+Intended status: Informational                            11 May 2026
+Expires: 12 November 2026
+
+
+            Owner-Policy DSL for Multi-Stakeholder AI Agents
+                 draft-cendra-owner-policy-dsl-00
+
+Abstract
+
+   This document specifies an Owner-Policy Domain-Specific Language
+   ("Owner-Policy DSL") for declaring per-tenant constraints on
+   autonomous AI agents operating in regulated multi-stakeholder
+   domains such as short-stay rental property management, financial
+   advisory, and healthcare-adjacent customer service.  The DSL is
+   small (six statement kinds, one ABNF grammar production per
+   statement), human-readable, and verifiable: each declared policy
+   compiles to a Z3 Satisfiability-Modulo-Theories (SMT) formula
+   whose satisfiability can be decided in polynomial time for the
+   numeric-range fragment.
+
+   The language is intended for environments where the agent's
+   principal (the owner or business operator) needs to express
+   hard and soft constraints that the agent runtime MUST enforce
+   without the operator authoring Python or other general-purpose
+   code.
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current
+   Internet-Drafts is at https://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six
+   months and may be updated, replaced, or obsoleted by other
+   documents at any time.  It is inappropriate to use Internet-
+   Drafts as reference material or to cite them other than as
+   "work in progress."
+
+   This Internet-Draft will expire on 12 November 2026.
+
+Copyright Notice
+
+   Copyright (c) 2026 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 1]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+Table of Contents
+
+   1.  Introduction  . . . . . . . . . . . . . . . . . . . . . . .   2
+   2.  Conventions and Definitions . . . . . . . . . . . . . . . .   3
+   3.  Document Structure  . . . . . . . . . . . . . . . . . . . .   3
+   4.  Syntax (ABNF) . . . . . . . . . . . . . . . . . . . . . . .   4
+   5.  Statement Semantics . . . . . . . . . . . . . . . . . . . .   5
+     5.1.  style . . . . . . . . . . . . . . . . . . . . . . . . .   5
+     5.2.  jurisdiction  . . . . . . . . . . . . . . . . . . . . .   6
+     5.3.  forbid  . . . . . . . . . . . . . . . . . . . . . . . .   6
+     5.4.  numeric_stmt  . . . . . . . . . . . . . . . . . . . . .   6
+   6.  Verifier Behaviour  . . . . . . . . . . . . . . . . . . . .   7
+   7.  Examples  . . . . . . . . . . . . . . . . . . . . . . . . .   8
+   8.  Implementation Status . . . . . . . . . . . . . . . . . . .   9
+   9.  Security Considerations . . . . . . . . . . . . . . . . . .   9
+   10. IANA Considerations . . . . . . . . . . . . . . . . . . . .  10
+   11. References  . . . . . . . . . . . . . . . . . . . . . . . .  10
+     11.1.  Normative References . . . . . . . . . . . . . . . . .  10
+     11.2.  Informative References . . . . . . . . . . . . . . . .  11
+   Author's Address  . . . . . . . . . . . . . . . . . . . . . . .  11
+
+1.  Introduction
+
+   Autonomous AI agents are increasingly deployed in regulated
+   domains where their principal (the owner or business operator)
+   is not the agent's developer.  In property management for
+   example, a host who owns ten apartments needs to constrain a
+   shared agent runtime so that her policies (minimum-night rules,
+   pricing floors, never accept refunds without owner approval)
+   are enforced no matter which agent variant the platform ships.
+
+   Existing access-control languages (XACML [XACML30], OPA Rego
+   [REGO]) are designed for resource-level authorisation, not for
+   constraining the action choices an LLM-backed agent makes
+   inside a single conversation.  The Owner-Policy DSL fills this
+   gap with a small, statically verifiable language whose runtime
+   semantics are deterministic and whose compiler emits Z3 SMT
+   formulas for static checking.
+
+   The Owner-Policy DSL is designed against four requirements:
+
+   1.  Operator-readable: an owner with no programming background
+       MUST be able to author a policy.
+
+   2.  Statically verifiable: the agent platform MUST be able to
+       decide, before any production traffic, whether a policy
+       document is internally consistent.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 2]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   3.  Runtime-enforceable: violating actions MUST be refused at
+       dispatch time.
+
+   4.  Multi-tenant: one document MAY declare policies for
+       multiple owners that the runtime SHALL keep isolated.
+
+2.  Conventions and Definitions
+
+   The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL
+   NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED",
+   "MAY", and "OPTIONAL" in this document are to be interpreted
+   as described in BCP 14 [RFC2119] [RFC8174] when, and only
+   when, they appear in all capitals, as shown here.
+
+   The following terms are used throughout the document:
+
+   Agent runtime:
+      The software process executing the autonomous agent's
+      decision loop.
+
+   Owner / Principal:
+      A natural or legal person who has commissioned the agent
+      runtime to act on their behalf.
+
+   Action class:
+      A named category of side-effecting tool the agent runtime
+      can invoke (e.g. "send_message", "accept_booking",
+      "issue_refund").
+
+   Planner style:
+      A named pre-configured strategy the agent's planner selects
+      from (e.g. "concise", "detail_first").  The set of styles
+      is platform-defined.
+
+   Numeric metric:
+      A scalar property of a candidate action or property state
+      (e.g. nightly rate, minimum nights) over which the DSL can
+      express range constraints.
+
+3.  Document Structure
+
+   An Owner-Policy DSL document is a sequence of one or more
+   owner-blocks.  Each owner-block is delimited by curly braces
+   and contains zero or more statements.  Whitespace is
+   insignificant outside string literals.  Line comments begin
+   with "//" and run to the end of the line.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 3]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   Statement order inside an owner-block is insignificant; the
+   compiler MUST treat the block as an unordered set of
+   constraints.
+
+   Each owner-block declares constraints scoped to one principal
+   identified by an opaque string.  The agent runtime MUST keep
+   policies belonging to different principals isolated; a
+   constraint declared inside one owner-block MUST NOT influence
+   the agent's behaviour when acting on behalf of another
+   principal.
+
+4.  Syntax (ABNF)
+
+   The grammar is given in ABNF [RFC5234] with one extension: the
+   token "STRING" denotes a JSON-style quoted string with
+   backslash escapes per [RFC8259].
+
+      document        = 1*owner-block
+      owner-block     = "owner" SP STRING SP "{" *statement "}"
+      statement       = style-stmt
+                      / jurisdiction-stmt
+                      / forbid-stmt
+                      / numeric-stmt
+      style-stmt      = "style" SP "=" SP identifier SP ";"
+      jurisdiction-stmt = "jurisdiction" SP "=" SP STRING SP ";"
+      forbid-stmt     = "forbid" SP ":" SP identifier
+                        *(SP "," SP identifier) SP ";"
+      numeric-stmt    = numeric-metric SP cmp-op SP integer SP ";"
+      numeric-metric  = "min_nights" / "max_nights"
+                      / "nightly_rate" / "max_guests"
+      cmp-op          = ">=" / "<=" / "==" / ">" / "<"
+      identifier      = ALPHA *(ALPHA / DIGIT / "_")
+      integer         = ["-"] 1*DIGIT
+      SP              = *WSP
+
+   ALPHA, DIGIT, and WSP are imported from the ABNF core rules in
+   [RFC5234], Appendix B.
+
+   Implementations MAY accept additional whitespace, comments, and
+   line breaks beyond the minimum mandated by the grammar.  A
+   conforming implementation MUST reject any token outside the
+   grammar.
+
+   The set of numeric metrics and the set of identifiers admitted
+   as style names or forbidden action classes are defined by the
+   agent runtime hosting the policy.  This document does not
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 4]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   enumerate them; implementations MUST publish their accepted
+   sets out-of-band (for example, in the same OpenAPI bundle that
+   ships the runtime).
+
+5.  Statement Semantics
+
+5.1.  style
+
+   The "style" statement pins the Planner style the agent runtime
+   MUST select when acting on behalf of the owner.  An owner-block
+   contains at most one "style" statement; the runtime MUST refuse
+   a document that declares two or more "style" statements in a
+   single owner-block.
+
+   Example:
+
+      owner "host-001" {
+          style = cooperative;
+      }
+
+   The set of admitted style identifiers is runtime-defined.
+   Submitting a "style" statement whose identifier is not in the
+   runtime's published set MUST cause the runtime to reject the
+   document.  The reference implementation (see Section 8) admits
+   the identifiers cooperative, defensive, compliance_strict,
+   vip_white_glove, budget_no_compromise, aggressive_revenue,
+   seasonal_high, seasonal_low, post_incident_recovery,
+   regulatory_audit_window, family_friendly_strict, and
+   pet_friendly.  Other deployments MAY publish a different set.
+
+5.2.  jurisdiction
+
+   The "jurisdiction" statement tags every action taken under the
+   owner-block with a string the regulator-facing audit log MUST
+   surface.  The runtime SHALL treat the value as opaque (no
+   normalisation, no case-folding) so the regulator's audit query
+   matches what the owner declared.
+
+   Example:
+
+      owner "host-001" {
+          jurisdiction = "EU/IE";
+      }
+
+5.3.  forbid
+
+   The "forbid" statement extends the structural deny-list of
+   action classes the runtime MUST refuse for this owner.  The
+   set of identifiers admitted on the right-hand side is the
+   intersection of the runtime's published action-class set and
+   the per-tenant subset the platform exposes to the owner.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 5]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   Example:
+
+      owner "host-001" {
+          forbid: charge_fee, issue_refund;
+      }
+
+   The runtime MAY surface the never-AI denylist (the platform-
+   wide set of action classes no agent variant is allowed to
+   take) in addition to the owner-declared deny-list.  The
+   effective deny-list is the union of both.
+
+5.4.  numeric_stmt
+
+   The "numeric_stmt" statement declares a range constraint on a
+   numeric metric.  The supported metrics and operators are
+   enumerated by the grammar in Section 4.
+
+   The constraint is interpreted as a closed half-plane.  Examples:
+
+      min_nights >= 7;        // hard floor on minimum nights
+      nightly_rate >= 230;    // pricing floor
+      max_guests <= 4;        // hard ceiling on party size
+
+   Each statement MUST be expressible as the SMT formula
+
+      (op metric value)
+
+   where (op, metric, value) is its parsed triple.  The compiler
+   asserts the conjunction of all numeric_stmts inside an owner-
+   block to the Z3 solver under [SMT-LIB].
+
+   When a candidate action proposes a numeric value that violates
+   any compiled constraint, the runtime MUST refuse the action.
+   The verifier SHALL return the witnessing constraint so the
+   audit log can record which specific clause vetoed the action.
+
+6.  Verifier Behaviour
+
+   A conforming verifier MUST implement the following pipeline
+   for each policy document:
+
+   1.  Parse the document against the grammar in Section 4.  If
+       parsing fails, reject the document with a syntactic error
+       referencing the offending line and column.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 6]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   2.  Resolve every identifier (style, forbidden action class,
+       numeric metric) against the runtime's published sets.
+       Reject with a semantic error if any identifier is
+       unknown.
+
+   3.  For each owner-block, build the conjunction of compiled
+       numeric_stmts as a Z3 SMT formula in the QF_LIA fragment
+       (quantifier-free linear integer arithmetic).
+
+   4.  Call the SMT solver under [SMT-LIB] to decide
+       satisfiability of the conjunction.
+
+       a.  If UNSAT, the verifier MUST emit a minimal witness
+           subset of clauses that are jointly unsatisfiable and
+           reject the document.
+
+       b.  If SAT, the verifier MAY return the satisfying
+           assignment for downstream introspection.
+
+   5.  Persist a per-document verdict, the verifier version, and
+       the witness (where applicable) to the audit log.
+
+   The QF_LIA fragment is decidable in polynomial time in the
+   length of the formula for fixed bit-width integers, so the
+   verifier latency MUST NOT depend on the agent's runtime
+   load.
+
+7.  Examples
+
+   The following example shows a complete document with three
+   owner-blocks demonstrating each statement kind.  The style and
+   action-class identifiers used below are those of the reference
+   implementation (Section 8); other deployments MAY publish a
+   different set per Section 5.1.
+
+      // Host who only accepts long stays.
+      owner "host-001" {
+          style = cooperative;
+          jurisdiction = "EU/IE";
+          min_nights >= 31;
+          nightly_rate >= 230;
+          forbid: charge_fee, issue_refund;
+      }
+
+      // Boutique hotel with stricter party-size limits.
+      owner "boutique-007" {
+          style = compliance_strict;
+          jurisdiction = "EU/FR";
+          max_nights <= 14;
+          max_guests <= 4;
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 7]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+      }
+
+      // Inconsistent owner block that the verifier MUST reject
+      // with an UNSAT verdict and a witness subset
+      // {min_nights >= 31, max_nights <= 14}.
+      owner "inconsistent-099" {
+          min_nights >= 31;
+          max_nights <= 14;
+      }
+
+   The first two blocks are SAT and would be admitted to runtime
+   enforcement.  The third block is UNSAT and the verifier MUST
+   reject the whole document — partial-document acceptance is
+   intentionally not specified.
+
+8.  Implementation Status
+
+   Note to RFC Editor: This section is to be removed before
+   publication.
+
+   A reference implementation is available in the Brain Engine
+   open-source project at the following dev-branch paths:
+
+      brain_engine/owner_policy/grammar.lark   - grammar
+      brain_engine/owner_policy/parser.py      - Lark parser
+      brain_engine/owner_policy/ast.py         - AST nodes
+      brain_engine/owner_policy/compiler.py    - compiler
+      brain_engine/owner_policy/z3_compiler.py - SMT verifier
+      brain_engine/owner_policy/registry.py    - runtime registry
+
+   The reference verifier uses Z3 version 4.16 or later.  A full
+   test suite exercises the parser, the compiler, and the SMT
+   verifier; the dev branch carries the full pytest suite.
+
+9.  Security Considerations
+
+   The Owner-Policy DSL is a constraint specification language;
+   it is consumed by an agent runtime that the principal trusts.
+   The following risks are in scope:
+
+   *  Identifier squatting: if the runtime's published action-
+      class set changes after a document is admitted, previously
+      compiled "forbid" statements MAY silently become no-ops or
+      refer to a different action.  Implementations MUST version
+      their published sets and refuse documents whose declared
+      identifiers belong to a retired version.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 8]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   *  Integer overflow: the numeric_stmt fragment accepts
+      arbitrary integer literals.  Implementations MUST reject
+      literals that overflow their internal representation
+      (typically 64-bit signed) rather than wrap silently.
+
+   *  Verifier denial-of-service: the QF_LIA fragment is
+      polynomial in formula length but pathological inputs may
+      still hit solver-internal heuristics.  Implementations
+      MUST bound the verifier wall-clock per document and refuse
+      documents whose verification times out.
+
+   *  Audit-log tampering: the verifier's verdict is the input
+      to the runtime's enforcement decision.  Implementations
+      SHOULD persist the verdict, the verifier version, the
+      input document hash, and the witness (where applicable) to
+      a tamper-evident append-only log.
+
+   *  Privilege escalation via jurisdiction tag: the
+      "jurisdiction" statement is intentionally opaque and the
+      runtime is not expected to interpret the value.
+      Operators MUST treat the field as untrusted input for any
+      automated downstream system (for example, do not switch
+      regulator endpoints on a verbatim "jurisdiction" match).
+
+10.  IANA Considerations
+
+   This document has no IANA actions.
+
+11.  References
+
+11.1.  Normative References
+
+   [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
+              Requirement Levels", BCP 14, RFC 2119,
+              DOI 10.17487/RFC2119, March 1997,
+              <https://www.rfc-editor.org/info/rfc2119>.
+
+   [RFC8174]  Leiba, B., "Ambiguity of Uppercase vs Lowercase in
+              RFC 2119 Key Words", BCP 14, RFC 8174,
+              DOI 10.17487/RFC8174, May 2017,
+              <https://www.rfc-editor.org/info/rfc8174>.
+
+   [RFC5234]  Crocker, D., Ed. and P. Overell, "Augmented BNF for
+              Syntax Specifications: ABNF", STD 68, RFC 5234,
+              DOI 10.17487/RFC5234, January 2008,
+              <https://www.rfc-editor.org/info/rfc5234>.
+
+
+
+Ataoglu                Expires 12 November 2026                 [Page 9]
+
+Internet-Draft                Owner-Policy DSL                  May 2026
+
+
+   [RFC8259]  Bray, T., Ed., "The JavaScript Object Notation
+              (JSON) Data Interchange Format", STD 90,
+              RFC 8259, DOI 10.17487/RFC8259, December 2017,
+              <https://www.rfc-editor.org/info/rfc8259>.
+
+   [SMT-LIB]  Barrett, C., Stump, A., and Tinelli, C., "The SMT-
+              LIB Standard: Version 2.6", 2017,
+              <http://smtlib.cs.uiowa.edu/papers/smt-lib-
+              reference-v2.6-r2017-07-18.pdf>.
+
+11.2.  Informative References
+
+   [XACML30]  Rissanen, E., Ed., "eXtensible Access Control
+              Markup Language (XACML) Version 3.0", OASIS
+              Standard, January 2013,
+              <http://docs.oasis-open.org/xacml/3.0/xacml-3.0-
+              core-spec-os-en.html>.
+
+   [REGO]     Open Policy Agent project, "Open Policy Agent",
+              <https://www.openpolicyagent.org/docs/policy-
+              language>.
+
+Author's Address
+
+   Devlet Ataoglu
+   Cendra / Bookly
+   Email: devlet@cendra.ai
+
+
+
+Ataoglu                Expires 12 November 2026                [Page 10]

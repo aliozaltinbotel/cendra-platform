@@ -15,7 +15,7 @@ The single source of truth for how this fork diverges from upstream `langgenius/
 
 ## Additive paths (never count as drift)
 
-`api/core/brain/**` · `api/models/brain_*.py` · `api/migrations/versions/<cendra ids>` · `api/services/brain_*.py` · `api/controllers/console/brain/**` · `api/controllers/service_api/brain/**` · `api/tasks/brain_*.py` · `api/tests/unit_tests/brain/**` · `web/**/brain/**` · `packs/**` · `reference/**` · `scripts/check_fork_drift.sh` · `FORK_LEDGER.md` · `PORTING_MAP.md` · `CLAUDE.md` · `docs/upstream-CLAUDE.md` · `.fork-base-sha`
+`api/core/brain/**` · `api/models/brain_*.py` · `api/migrations/versions/<cendra ids>` · `api/services/brain_*.py` · `api/controllers/console/brain/**` · `api/controllers/service_api/brain/**` · `api/tasks/brain_*.py` · `api/tests/unit_tests/brain/**` · `web/**/brain/**` · `packs/**` · `reference/**` · `scripts/check_fork_drift.sh` · `FORK_LEDGER.md` · `PORTING_MAP.md` · `CLAUDE.md` · `docs/upstream-CLAUDE.md` · `docs/draft-cendra-*` · `.fork-base-sha`
 
 ## Runtime touchpoints (T-entries) — max 8
 
@@ -41,6 +41,7 @@ Every hooked block in code: `# CENDRA-HOOK(Tn): <reason>`. Rule: `git grep -c "C
 | C3 | `api/.importlinter` | Contract `brain-kernel-isolation`: `core.brain ↛ core.workflow / core.app / core.agent` (`reference/` is not a root package, so no ignore needed) | Batch 1 |
 | C4 | `Makefile` | Add `fork-drift` target (additive) | Batch 1 |
 | C5 | `CLAUDE.md` | Replaced with Cendra version; upstream copy moved to `docs/upstream-CLAUDE.md` | Batch 1 |
+| C6 | `api/controllers/service_api/__init__.py` | **One additive import line** registering the additive `service_api/brain` package (T6 retrieval, TrustMeter, policies, audit). Route registration of additive packages — flagged for review: if more controller surfaces need registration in Batch 6 (console), discuss whether this becomes a numbered touchpoint | Batch 5 |
 
 ## Rebase log
 
@@ -61,13 +62,14 @@ ALLOW='^(api/core/brain/|api/models/brain_|api/services/brain_|api/tasks/brain_'
 ALLOW+='|api/controllers/console/brain/|api/controllers/service_api/brain/'
 ALLOW+='|api/tests/unit_tests/brain/|api/migrations/versions/|web/.*/brain/'
 ALLOW+='|packs/|reference/|scripts/check_fork_drift.sh'
-ALLOW+='|FORK_LEDGER.md|PORTING_MAP.md|CLAUDE.md|docs/upstream-CLAUDE.md|\.fork-base-sha)'
+ALLOW+='|FORK_LEDGER.md|PORTING_MAP.md|CLAUDE.md|docs/upstream-CLAUDE.md|docs/draft-cendra-|\.fork-base-sha)'
 
 REGISTERED='^(api/core/workflow/node_runtime.py|api/core/workflow/node_factory.py'
 REGISTERED+='|api/core/workflow/nodes/agent_v2/|api/core/moderation/'
 REGISTERED+='|api/extensions/ext_celery.py|api/core/rag/retrieval/'
 REGISTERED+='|api/core/callback_handler/|docker/'
-REGISTERED+='|api/pyproject.toml|api/uv.lock|api/.ruff.toml|.dockerignore|Makefile|api/.importlinter)'   # keep in sync with T/C tables
+REGISTERED+='|api/pyproject.toml|api/uv.lock|api/.ruff.toml|.dockerignore|Makefile|api/.importlinter'
+REGISTERED+='|api/controllers/service_api/__init__.py)'   # keep in sync with T/C tables
 
 VIOLATIONS=$(git diff --name-only "$BASE"..HEAD \
   | grep -Ev "$ALLOW" \
