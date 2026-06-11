@@ -5,7 +5,7 @@ registry emitted by the abstention gate (CEN-15 Part B, ruling §E2:
 one row per abstention; dedup happens at the read API).  Additive only.
 
 Revision ID: c3ndra0b8001
-Revises: c3ndra0b6001
+Revises: c3ndra0b7003
 Create Date: 2026-06-11
 
 """
@@ -16,7 +16,7 @@ import models as models
 
 # revision identifiers, used by Alembic.
 revision = 'c3ndra0b8001'
-down_revision = 'c3ndra0b6001'
+down_revision = 'c3ndra0b7003'
 branch_labels = None
 depends_on = None
 

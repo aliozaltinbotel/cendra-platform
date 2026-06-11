@@ -9,25 +9,36 @@ Tenant-scoped throughout; sessions come from the Dify engine.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from core.brain.abstention.calibrator import DEFAULT_MIN_SAMPLES
+from core.brain.abstention.protocols import DEFAULT_WINDOW_SIZE
 from core.brain.autonomy.engine import AutonomyEngine
 from core.brain.autonomy.sa_store import SQLAlchemyAutonomyStore, SQLAlchemyWorkflowKindRegistry
 from core.brain.autonomy.trust_meter import TrustMeterService
 from core.brain.compliance import PIIDetector, redact
 from core.brain.patterns.case_store import SQLAlchemyDecisionCaseStore
-from core.brain.patterns.models import DecisionCase
+from core.brain.patterns.models import DecisionCase, DecisionType
 from core.brain.patterns.shadow_verdict import read_shadow_verdict, verdict_of
 from core.brain.policy.compiler import OwnerPolicyCompiler
 from core.brain.policy.parser import OwnerPolicyParser
 from extensions.ext_database import db
+from models.brain_autonomy import BrainWorkflowKind
+from models.brain_calibration import BrainCalibrationSample
+from models.brain_decision import BrainDecisionCase
 from models.brain_policy import BrainOwnerPolicy
 
 logger = logging.getLogger(__name__)
+
+_METRICS_MAX_WINDOW_DAYS = 90
+_UNKNOWN_WORKFLOW = "unknown"
+_VERDICT_KEYS = ("would_act", "would_abstain", "unknown")
 
 
 def _session_maker() -> sessionmaker:
@@ -95,6 +106,114 @@ def _serialize_case(case: DecisionCase, detector: PIIDetector) -> dict[str, Any]
         "created_at": case.created_at.isoformat(),
         "decision_at": case.decision_at.isoformat() if case.decision_at else None,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkflowRegistryCache:
+    """Cached per-tenant workflow-kind aliases for one metrics read.
+
+    The accrual endpoint buckets rows by operator-facing workflow kind,
+    not by raw tool id. The registry rows are the canonical alias map:
+    ``send_access_code`` -> ``code_release`` and so on. Unknown tool ids
+    stay visible as-is so product surfaces can still account for traffic
+    before the pack registry is updated.
+    """
+
+    alias_to_workflow: dict[str, str]
+    labels: dict[str, str]
+
+    def resolve(self, tool_id: str | None) -> str:
+        if tool_id is None:
+            return _UNKNOWN_WORKFLOW
+        normalized = tool_id.strip()
+        if not normalized:
+            return _UNKNOWN_WORKFLOW
+        return self.alias_to_workflow.get(normalized.lower(), normalized)
+
+    def label_for(self, workflow: str) -> str:
+        return self.labels.get(workflow, workflow)
+
+
+def _empty_verdict_counts() -> dict[str, int]:
+    return dict.fromkeys(_VERDICT_KEYS, 0)
+
+
+def _record_verdict(counts: dict[str, int], verdict: str) -> None:
+    counts[verdict if verdict in counts else "unknown"] += 1
+
+
+def _day_start(day: date) -> datetime:
+    return datetime.combine(day, time.min, tzinfo=UTC)
+
+
+def _day_window(date_from: date, date_to: date) -> tuple[datetime, datetime]:
+    start = _day_start(date_from)
+    end = _day_start(date_to + timedelta(days=1))
+    return start.replace(tzinfo=None), end.replace(tzinfo=None)
+
+
+def _iter_days(date_from: date, date_to: date) -> list[date]:
+    return [date_from + timedelta(days=offset) for offset in range((date_to - date_from).days + 1)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _utc_isoformat(moment: datetime | None) -> str | None:
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=UTC).isoformat()
+    return moment.astimezone(UTC).isoformat()
+
+
+def _workflow_scope(
+    workflow_registry: _WorkflowRegistryCache,
+    workflow: str | None,
+) -> str | None:
+    normalized = _first_text(workflow)
+    if normalized is None:
+        return None
+    return workflow_registry.resolve(normalized)
+
+
+def _workflow_from_case_payload(
+    decision: Any,
+    outcome: Any,
+    orchestrator_verdict: Any,
+    workflow_registry: _WorkflowRegistryCache,
+) -> str:
+    decision_payload = _mapping(decision)
+    decision_params = _mapping(decision_payload.get("params"))
+    outcome_payload = _mapping(outcome)
+    orchestrator_payload = _mapping(orchestrator_verdict)
+    explicit_workflow = _first_text(
+        decision_params.get("workflow"),
+        decision_params.get("workflow_kind"),
+        outcome_payload.get("workflow"),
+        outcome_payload.get("workflow_kind"),
+        orchestrator_payload.get("workflow"),
+    )
+    if explicit_workflow is not None:
+        return workflow_registry.resolve(explicit_workflow)
+    event_alias = _first_text(
+        decision_params.get("tool_id"),
+        decision_params.get("event_type"),
+        decision_params.get("action_kind"),
+        orchestrator_payload.get("tool_id"),
+    )
+    return workflow_registry.resolve(event_alias)
 
 
 class BrainGovernanceService:
@@ -186,6 +305,182 @@ class BrainGovernanceService:
         cases = store.search(property_id=property_id, limit=limit, offset=offset)
         detector = PIIDetector()
         return [_serialize_case(case, detector) for case in cases]
+
+    # ── case metrics (bounded accrual aggregates, CEN-32) ────────── #
+
+    def case_metrics(
+        self,
+        *,
+        date_from: date,
+        date_to: date,
+        workflow: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate the dispatch ledger over one inclusive UTC date window.
+
+        The capture-integrity counts honour the requested window on both
+        sources: ``brain_decision_cases`` for captured rows and
+        ``brain_calibration_samples`` for dispatched observations. The
+        per-workflow calibration coverage, however, reflects the current
+        bounded calibration window because that is what the abstention
+        gate consults at runtime.  ``workflow`` optionally narrows the
+        aggregates to one automation id (stable workflow kind or raw
+        event alias) and surfaces recency on that scoped bucket.
+        """
+        span_days = (date_to - date_from).days + 1
+        if span_days <= 0:
+            raise ValueError("date_to must be on or after date_from")
+        if span_days > _METRICS_MAX_WINDOW_DAYS:
+            raise ValueError(f"date range must be {_METRICS_MAX_WINDOW_DAYS} days or fewer")
+
+        window_start, window_end = _day_window(date_from, date_to)
+        verdict_counts = _empty_verdict_counts()
+        by_day = {
+            day.isoformat(): {
+                "date": day.isoformat(),
+                "captured_count": 0,
+                "dispatched_count": 0,
+                "verdict_counts": _empty_verdict_counts(),
+            }
+            for day in _iter_days(date_from, date_to)
+        }
+        by_workflow: dict[str, dict[str, Any]] = {}
+        current_sample_sizes: dict[str, int] = defaultdict(int)
+
+        with self._sessions() as session:
+            workflow_registry = self._workflow_registry(session)
+            workflow_filter = _workflow_scope(workflow_registry, workflow)
+            case_rows = session.execute(
+                select(
+                    BrainDecisionCase.created_at,
+                    BrainDecisionCase.decision,
+                    BrainDecisionCase.outcome,
+                    BrainDecisionCase.orchestrator_verdict,
+                ).where(
+                    BrainDecisionCase.tenant_id == self._tenant_id,
+                    BrainDecisionCase.decision_type == DecisionType.DISPATCH.value,
+                    BrainDecisionCase.archived_at.is_(None),
+                    BrainDecisionCase.created_at >= window_start,
+                    BrainDecisionCase.created_at < window_end,
+                )
+            ).all()
+            dispatched_rows = session.execute(
+                select(
+                    BrainCalibrationSample.recorded_at,
+                    BrainCalibrationSample.tool_id,
+                ).where(
+                    BrainCalibrationSample.tenant_id == self._tenant_id,
+                    BrainCalibrationSample.recorded_at >= window_start,
+                    BrainCalibrationSample.recorded_at < window_end,
+                )
+            ).all()
+            calibration_tool_ids = session.execute(
+                select(BrainCalibrationSample.tool_id).where(
+                    BrainCalibrationSample.tenant_id == self._tenant_id,
+                )
+            ).scalars()
+            for tool_id in calibration_tool_ids:
+                resolved_workflow = workflow_registry.resolve(tool_id)
+                if workflow_filter is not None and resolved_workflow != workflow_filter:
+                    continue
+                current_sample_sizes[resolved_workflow] += 1
+
+        def ensure_workflow_bucket(workflow_name: str) -> dict[str, Any]:
+            return by_workflow.setdefault(
+                workflow_name,
+                {
+                    "workflow": workflow_name,
+                    "label": workflow_registry.label_for(workflow_name),
+                    "captured_count": 0,
+                    "dispatched_count": 0,
+                    "verdict_counts": _empty_verdict_counts(),
+                    "latest_case_at": None,
+                    "latest_dispatch_at": None,
+                },
+            )
+
+        for row in dispatched_rows:
+            day_key = row.recorded_at.date().isoformat()
+            resolved_workflow = workflow_registry.resolve(row.tool_id)
+            if workflow_filter is not None and resolved_workflow != workflow_filter:
+                continue
+            by_day[day_key]["dispatched_count"] += 1
+            bucket = ensure_workflow_bucket(resolved_workflow)
+            bucket["dispatched_count"] += 1
+            latest_dispatch_at = bucket["latest_dispatch_at"]
+            if latest_dispatch_at is None or row.recorded_at > latest_dispatch_at:
+                bucket["latest_dispatch_at"] = row.recorded_at
+
+        for row in case_rows:
+            day_key = row.created_at.date().isoformat()
+            verdict = verdict_of(row.orchestrator_verdict)
+            resolved_workflow = _workflow_from_case_payload(
+                row.decision,
+                row.outcome,
+                row.orchestrator_verdict,
+                workflow_registry,
+            )
+            if workflow_filter is not None and resolved_workflow != workflow_filter:
+                continue
+            by_day_bucket = by_day[day_key]
+            by_day_bucket["captured_count"] += 1
+            _record_verdict(by_day_bucket["verdict_counts"], verdict)
+            _record_verdict(verdict_counts, verdict)
+            workflow_bucket = ensure_workflow_bucket(resolved_workflow)
+            workflow_bucket["captured_count"] += 1
+            _record_verdict(workflow_bucket["verdict_counts"], verdict)
+            latest_case_at = workflow_bucket["latest_case_at"]
+            if latest_case_at is None or row.created_at > latest_case_at:
+                workflow_bucket["latest_case_at"] = row.created_at
+
+        if workflow_filter is not None:
+            ensure_workflow_bucket(workflow_filter)
+
+        workflow_rows = sorted(
+            by_workflow.values(),
+            key=lambda bucket: (
+                -int(bucket["captured_count"]),
+                -int(bucket["dispatched_count"]),
+                str(bucket["workflow"]),
+            ),
+        )
+        covered_workflow_count = 0
+        for bucket in workflow_rows:
+            sample_size = current_sample_sizes.get(str(bucket["workflow"]), 0)
+            covered = sample_size >= DEFAULT_MIN_SAMPLES
+            if covered:
+                covered_workflow_count += 1
+            bucket["calibration_window"] = {
+                "sample_size": sample_size,
+                "covered": covered,
+            }
+            bucket["latest_case_at"] = _utc_isoformat(bucket["latest_case_at"])
+            bucket["latest_dispatch_at"] = _utc_isoformat(bucket["latest_dispatch_at"])
+
+        captured_count = sum(int(bucket["captured_count"]) for bucket in workflow_rows)
+        dispatched_count = sum(int(bucket["dispatched_count"]) for bucket in workflow_rows)
+        active_workflow_count = len(workflow_rows)
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
+            "capture_integrity": {
+                "captured_count": captured_count,
+                "dispatched_count": dispatched_count,
+                "capture_rate": (round(captured_count / dispatched_count, 4) if dispatched_count else None),
+            },
+            "calibration_window": {
+                "window_size": DEFAULT_WINDOW_SIZE,
+                "min_samples": DEFAULT_MIN_SAMPLES,
+                "active_workflow_count": active_workflow_count,
+                "covered_workflow_count": covered_workflow_count,
+                "coverage_rate": (
+                    round(covered_workflow_count / active_workflow_count, 4) if active_workflow_count else None
+                ),
+            },
+            "by_day": [by_day[day.isoformat()] for day in _iter_days(date_from, date_to)],
+            "by_workflow": workflow_rows,
+            "by_verdict": verdict_counts,
+        }
 
     # ── T6 retrieval (external knowledge loopback) ─────────────── #
 
@@ -283,3 +578,19 @@ class BrainGovernanceService:
             "valid_window_unverified": validity.unverified_window,
             "observation_id": observation.observation_id,
         }
+
+    def _workflow_registry(self, session) -> _WorkflowRegistryCache:
+        rows = session.execute(
+            select(BrainWorkflowKind).where(
+                BrainWorkflowKind.tenant_id == self._tenant_id,
+                BrainWorkflowKind.enabled.is_(True),
+            )
+        ).scalars()
+        alias_to_workflow: dict[str, str] = {}
+        labels: dict[str, str] = {}
+        for row in rows:
+            alias_to_workflow[row.kind.lower()] = row.kind
+            labels[row.kind] = row.label or row.kind
+            for alias in row.event_aliases or ():
+                alias_to_workflow[str(alias).lower()] = row.kind
+        return _WorkflowRegistryCache(alias_to_workflow=alias_to_workflow, labels=labels)
