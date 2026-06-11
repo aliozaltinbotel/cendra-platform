@@ -18,6 +18,16 @@ every side-effecting tool-call:
   checks expiry / scope / policy ceiling, and returns a structured
   result the audit log records.
 
+Two distinct signed artifacts live here (CEN-14 PRD §2.4):
+
+- the **authorization certificate** above — an *input* token,
+  internal and short-lived, HMAC-SHA256 (symmetric is sufficient
+  inside one trust domain);
+- the **criticality receipt** (:mod:`core.brain.certificates.receipt`)
+  — an *output* attestation minted at PROCEED for audiences across
+  trust domains (operator, guest, regulator), signed **Ed25519** for
+  non-repudiation.  HMAC must never sign a receipt.
+
 Defensibility (Moat #3): per-action-class autonomy ladder with
 cryptographic certificate binding and runtime middleware verifier
 for regulated LLM-agents.  Feng et al. defines the labels;
@@ -39,6 +49,17 @@ from core.brain.certificates.issuer import (
 from core.brain.certificates.policy import (
     TierPolicy,
 )
+from core.brain.certificates.receipt import (
+    RECEIPT_ALGORITHM_ED25519,
+    ReceiptEnvelope,
+    ReceiptSigner,
+    ReceiptVerifyOutcome,
+    ReceiptVerifyResult,
+    VerificationKeyLookup,
+    canonical_receipt_payload,
+    seal_receipt,
+    verify_receipt,
+)
 from core.brain.certificates.tier import (
     TIER_RANK,
     AutonomyTier,
@@ -53,14 +74,23 @@ from core.brain.certificates.verifier import (
 __all__ = [
     "DEFAULT_TTL_SECONDS",
     "MIN_KEY_BYTES",
+    "RECEIPT_ALGORITHM_ED25519",
     "TIER_RANK",
     "AutonomyCertificate",
     "AutonomyTier",
     "CertificateIssuer",
     "CertificateVerifier",
+    "ReceiptEnvelope",
+    "ReceiptSigner",
+    "ReceiptVerifyOutcome",
+    "ReceiptVerifyResult",
     "TierPolicy",
+    "VerificationKeyLookup",
     "VerifyOutcome",
     "VerifyResult",
     "canonical_payload",
+    "canonical_receipt_payload",
+    "seal_receipt",
     "tier_rank",
+    "verify_receipt",
 ]
