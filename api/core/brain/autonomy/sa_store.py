@@ -155,6 +155,9 @@ class SQLAlchemyWorkflowKindRegistry:
     def kinds(self) -> tuple[str, ...]:
         return tuple(row.kind for row in self._rows())
 
+    def labels(self) -> dict[str, str]:
+        return {row.kind: (row.label or row.kind) for row in self._rows()}
+
     def resolve_event(self, event_type: str) -> str | None:
         if not event_type:
             return None

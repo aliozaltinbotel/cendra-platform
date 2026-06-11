@@ -29,6 +29,18 @@ def test_hospitality_pack_loads_every_surface():
     assert registry.resolve_event("send_access_code") == "code_release"
 
 
+def test_hospitality_pack_parses_workflow_kind_labels():
+    pack = load_pack(PACK_DIR)
+    # operator-facing copy seeded from the journey vocabulary (CEN-50)
+    assert pack.workflow_kind_labels["code_release"] == "Access Code Release"
+    assert pack.workflow_kind_labels["inquiry_reply"] == "Inquiry Reply"
+    # every kind in the hospitality pack ships a label
+    assert set(pack.workflow_kind_labels) == set(pack.workflow_kind_aliases)
+    # the in-memory registry exposes them, defaulting to the kind when absent
+    labels = pack.workflow_kind_registry().labels()
+    assert labels["code_release"] == "Access Code Release"
+
+
 def test_seed_workflow_kinds_idempotent():
     engine = create_engine("sqlite:///:memory:")
     BrainWorkflowKind.__table__.create(engine)
@@ -40,6 +52,8 @@ def test_seed_workflow_kinds_idempotent():
     assert second == 0
     with sessions() as session:
         assert session.query(BrainWorkflowKind).count() == first
+        row = session.query(BrainWorkflowKind).filter_by(kind="code_release").one()
+        assert row.label == "Access Code Release"
     engine.dispose()
 
 

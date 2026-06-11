@@ -8,31 +8,47 @@
 #
 # Extracted at Batch 2 port time from the reference's
 # autonomy/workflow_kinds.py (WorkflowKind + _EVENT_TYPE_MAP).
+#
+# `label` is the operator-facing display name surfaced via the Trust Meter
+# read (CEN-50).  Additive and tenant-scoped: kinds stay stable wire values;
+# labels are seeded copy (Packs/Compass ratify in the sibling issue).
 
 workflow_kinds:
   mismatch_extra_fee:
+    label: Extra-Guest Fee
     event_aliases: [guest_count_mismatch, extra_person_fee, extra_fee]
   code_release:
+    label: Access Code Release
     event_aliases: [send_access_code, access_code_request]
   orphan_night:
+    label: Orphan-Night Gap
     event_aliases: [min_stay_exception]
   early_checkin:
+    label: Early Check-In
     event_aliases: [early_checkin_request]
   late_checkout:
+    label: Late Checkout
     event_aliases: [late_checkout_request]
   damage_claim:
+    label: Damage Claim
     event_aliases: [damage_report]
   vendor_dispatch:
+    label: Vendor Dispatch
     event_aliases: [vendor_dispatched, cleaner_dispatched]
   upsell_offer:
+    label: Upsell Offer
     event_aliases: [upsell, upsell_accepted, transfer_offer]
   discount_request:
+    label: Discount Request
     event_aliases: [discount_handling]
   pattern_promotion:
+    label: Autonomy Promotion
     event_aliases: [pattern_promote, pattern_demote]
   daily_briefing:
+    label: Daily Briefing
     event_aliases: []
   inquiry_reply:
+    label: Inquiry Reply
     event_aliases: [inquiry]
 
 # Incident event types the metrics collector counts as incidents

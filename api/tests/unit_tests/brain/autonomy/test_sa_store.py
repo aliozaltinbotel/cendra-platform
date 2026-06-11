@@ -106,8 +106,10 @@ class TestRegistry:
                     tenant_id=TENANT,
                     kind="code_release",
                     event_aliases=["send_access_code", "access_code_request"],
+                    label="Access Code Release",
                 )
             )
+            # no label -> labels() must fall back to the kind string
             session.add(BrainWorkflowKind(tenant_id=TENANT, kind="late_checkout"))
             session.add(
                 BrainWorkflowKind(
@@ -128,3 +130,11 @@ class TestRegistry:
         assert registry.resolve_event("late_checkout") == "late_checkout"
         assert registry.resolve_event("other_vertical_kind") is None
         assert registry.resolve_event("") is None
+
+    def test_labels_falls_back_to_kind_when_null(self, registry):
+        labels = registry.labels()
+        # tenant-scoped + enabled-only, same as kinds()
+        assert set(labels) == {"code_release", "late_checkout"}
+        assert labels["code_release"] == "Access Code Release"
+        # null label column -> kind string (never null)
+        assert labels["late_checkout"] == "late_checkout"

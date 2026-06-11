@@ -52,12 +52,13 @@ class PackData:
     blocker_severity: dict[str, BlockerSeverity] = field(default_factory=dict)
     blocker_actions: dict[str, tuple[str, ...]] = field(default_factory=dict)
     workflow_kind_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    workflow_kind_labels: dict[str, str] = field(default_factory=dict)
     incident_event_types: frozenset[str] = frozenset()
     scenario_features: dict[str, FeatureWhitelist] = field(default_factory=dict)
     scenarios: tuple[str, ...] = ()
 
     def workflow_kind_registry(self) -> InMemoryWorkflowKindRegistry:
-        return InMemoryWorkflowKindRegistry(self.workflow_kind_aliases)
+        return InMemoryWorkflowKindRegistry(self.workflow_kind_aliases, self.workflow_kind_labels)
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -93,6 +94,11 @@ def load_pack(pack_dir: str | Path) -> PackData:
         kind: tuple((spec or {}).get("event_aliases") or ())
         for kind, spec in (kinds_raw.get("workflow_kinds") or {}).items()
     }
+    kind_labels = {
+        kind: str((spec or {}).get("label"))
+        for kind, spec in (kinds_raw.get("workflow_kinds") or {}).items()
+        if (spec or {}).get("label")
+    }
 
     features_raw = _read_yaml(root / "scenario_features.yaml")
     scenario_features = {
@@ -114,6 +120,7 @@ def load_pack(pack_dir: str | Path) -> PackData:
         blocker_severity=blocker_severity,
         blocker_actions=blocker_actions,
         workflow_kind_aliases=kind_aliases,
+        workflow_kind_labels=kind_labels,
         incident_event_types=frozenset(kinds_raw.get("incident_event_types") or ()),
         scenario_features=scenario_features,
         scenarios=scenarios,
@@ -137,6 +144,7 @@ def seed_workflow_kinds(pack: PackData, *, session_maker, tenant_id: str) -> int
     written = 0
     with session_maker() as session:
         for kind, aliases in pack.workflow_kind_aliases.items():
+            label = pack.workflow_kind_labels.get(kind)
             row = session.execute(
                 select(BrainWorkflowKind).where(
                     BrainWorkflowKind.tenant_id == tenant_id,
@@ -144,10 +152,15 @@ def seed_workflow_kinds(pack: PackData, *, session_maker, tenant_id: str) -> int
                 )
             ).scalar_one_or_none()
             if row is None:
-                session.add(BrainWorkflowKind(tenant_id=tenant_id, kind=kind, event_aliases=list(aliases)))
+                session.add(
+                    BrainWorkflowKind(
+                        tenant_id=tenant_id, kind=kind, event_aliases=list(aliases), label=label
+                    )
+                )
                 written += 1
             else:
                 row.event_aliases = list(aliases)
+                row.label = label
                 row.enabled = True
         session.commit()
     return written

@@ -208,6 +208,20 @@ class TestWorkflowKindRegistry:
         assert resolver(_Interaction(event_type="late_checkout_request")) == "late_checkout"
         assert resolver(_Interaction(event_type="mystery")) is None
 
+    def test_labels_default_to_kind_and_ctor_is_back_compatible(self):
+        # ctor with no labels (existing event_aliases-only callers) ->
+        # every kind labels to itself, never null
+        assert REGISTRY.labels() == {"code_release": "code_release", "late_checkout": "late_checkout"}
+        # labels map merges, missing entries still fall back to the kind
+        labelled = InMemoryWorkflowKindRegistry(
+            {"code_release": ("send_access_code",), "late_checkout": ()},
+            {"code_release": "Access Code Release"},
+        )
+        assert labelled.labels() == {
+            "code_release": "Access Code Release",
+            "late_checkout": "late_checkout",
+        }
+
 
 class TestMetricsCollector:
     def test_aggregate_buckets_by_resolved_workflow(self):

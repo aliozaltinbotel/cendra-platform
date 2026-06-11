@@ -63,3 +63,6 @@ class BrainWorkflowKind(Base, DefaultFieldsMixin):
     kind: Mapped[str] = mapped_column(String(255), nullable=False)
     event_aliases: Mapped[list] = mapped_column(AdjustedJSON, nullable=False, default=list)
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    # Operator-facing display name (CEN-50); nullable — readers fall back
+    # to ``kind`` so the wire value never leaks an empty label.
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
