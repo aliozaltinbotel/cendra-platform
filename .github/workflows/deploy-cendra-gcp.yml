@@ -12,7 +12,8 @@ on:
 
 concurrency:
   group: deploy-gcp
-  cancel-in-progress: false
+  # a newer commit supersedes the one being deployed
+  cancel-in-progress: true
 
 env:
   PROJECT_ID: brainenginev2
@@ -41,21 +42,15 @@ jobs:
             --substitutions=_REGION=${REGION},_PROJECT_ID=${PROJECT_ID},_TAG=${GITHUB_SHA::12} \
             .
 
-      - name: Roll dify-service revision
+      - name: Roll dify-service + dify-beat revisions (parallel)
         run: |
-          gcloud run services update dify-service \
-            --region ${REGION} \
-            --container dify-api \
-            --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/dify-api-repo/dify-api:${GITHUB_SHA::12}-cr \
-            --container dify-worker \
-            --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/dify-api-repo/dify-api:${GITHUB_SHA::12}-cr
-
-      - name: Roll dify-beat revision
-        run: |
-          gcloud run services update dify-beat \
-            --region ${REGION} \
-            --container dify-beat \
-            --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/dify-api-repo/dify-api:${GITHUB_SHA::12}-cr
+          IMG=${REGION}-docker.pkg.dev/${PROJECT_ID}/dify-api-repo/dify-api:${GITHUB_SHA::12}-cr
+          gcloud run services update dify-service --region ${REGION} \
+            --container dify-api --image $IMG \
+            --container dify-worker --image $IMG &
+          gcloud run services update dify-beat --region ${REGION} \
+            --container dify-beat --image $IMG &
+          wait
 
       - name: Smoke check
         run: |
