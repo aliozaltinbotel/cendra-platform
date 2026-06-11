@@ -2,12 +2,12 @@
 
 > **Owner:** Compass (productization + hospitality UX) · **Domain grounding:** Packs (473-scenario STR corpus + journey stages)
 > **Count note (Compass ruling, 2026-06-11):** the corpus catalog holds **473 scenario records across 9 journey stages** (469 carry the full classification template). The earlier "482" figure also counted the corpus doc's 9 numbered preamble sections; all product claims, demos, and G3 evidence packs cite **473**.
-> **License sign-off column:** Forge (architecture + license guardrail — must sign off before any rename touches Dify chrome). Forge's sign-off issue: [CEN-9](/CEN/issues/CEN-9).
+> **License track:** Board-owned. Per board direction (CEN-8 comment, 2026-06-11), license compliance with LangGenius is handled at board level under an existing agreement — it is **not** a product or engineering gate. The scope labels in this doc are retained as an engineering record of which surfaces are ours vs. Dify's. Historical context: [CEN-9](/CEN/issues/CEN-9).
 > **Cross-links:** [Dify Capability Register](./dify-capability-register.md) · [Moat Fit Map](./moat-fit-map.md)
 > **Last updated:** 2026-06-11
 > **Purpose:** The generic→hospitality transformation layer: terminology, UX surface decisions, and the license-safe scope column that prevents terminology work from crossing into license-violating rebranding.
 >
-> **Finalization status (Compass, CEN-8, 2026-06-11):** Terminology table and UX surface decisions are **FINAL** on the product side. Every row carries a license scope label; rows whose scope is ambiguous are marked **Ruling Q*n*** and enumerated in §3 for Forge ([CEN-9](/CEN/issues/CEN-9)). Every framing sold as differentiation cites its [Moat Fit Map](./moat-fit-map.md) anchor (column "Differentiation"); framings with no anchor are flagged in §4 for Atlas's clone-risk list. Implementation of any **(b)** or **Ruling** row remains blocked on Forge.
+> **Finalization status (Compass, CEN-8, 2026-06-11):** Terminology table and UX surface decisions are **FINAL** on the product side. Every row carries a license scope label; rows whose scope is ambiguous are marked **Ruling Q*n*** and enumerated in §3 as a record for the board-level license track. Every framing sold as differentiation cites its [Moat Fit Map](./moat-fit-map.md) anchor (column "Differentiation"); framings with no anchor are flagged in §4 for Atlas's clone-risk list. **Per board direction (2026-06-11): license questions do not gate implementation.** The one standing exception: Dify branding itself (logo, attribution notices) is never modified by this org — that work, if it happens, is executed under the board's LangGenius arrangement, not by Cendra engineering.
 
 ---
 
@@ -18,9 +18,9 @@
 | **(a) Our surface** | Cendra-owned UI, copy, templates, or workflow nodes — free to rename, reframe, and design without LangGenius permission | `web/**/brain/` components, Cendra console pages, operator-facing copy, workflow DSL templates |
 | **(b) Dify chrome** | Dify-branded UI elements, logos, navigation, or components — **may NOT be renamed, hidden, or modified** without the LangGenius commercial agreement | Dify logo, Studio header, Dify-branded console nav, Dify copyright notices |
 | **(c) Neutral** | Generic UI patterns (buttons, tables, forms) with no Dify branding — free to style and relabel | Data tables, chat bubbles, form fields, icons from open libraries |
-| **Ruling Q*n*** | Scope is ambiguous between (a)/(c) and (b) — explicitly parked for Forge; see §3 "Open License Questions" | Role-gating Dify-branded pages, CSS theming boundaries, Explore wrapping |
+| **Ruling Q*n*** | Scope is ambiguous between (a)/(c) and (b) — recorded in §3 "Open License Questions" for the board-level license track | Role-gating Dify-branded pages, CSS theming boundaries, Explore wrapping |
 
-> **Forge sign-off required** on any row marked **(b)** or **Ruling Q*n*** before implementation. Do not let terminology work quietly cross from (a)/(c) into (b).
+> **Board direction (2026-06-11):** license compliance is owned and handled at board level; **(b)** and **Ruling Q*n*** labels are an engineering record, not an implementation gate. The labels stay on every row so we always know which surfaces are ours — terminology work still must not quietly cross from (a)/(c) into (b) without the scope label being updated.
 
 ---
 
@@ -47,10 +47,10 @@
 | Gate chain output: ABSTAIN | "I'm not sure — this needs you" | (a) Our surface | Not required | MOAT #4 | Calibrated abstention expressed in operator language |
 | Gate chain output: EXECUTE | "Acting now" | (a) Our surface | Not required | MOAT #1 | |
 | Gate chain output: REVIEW_REQUIRED | "Waiting for your approval" | (a) Our surface | Not required | MOAT #4 + #13 | #13 approval-gateway wiring is pending — queue semantics ship with it |
-| Execution mode: DRAFT | "Ready for you to send" | (a) Our surface | Not required | MOAT #1/#2 **only as a rung of the earned-autonomy ladder** — standalone framing flagged (§4) | Corpus default execution mode "Draft": Cendra prepares the reply, PM sends. The highest-volume supervised mode and the trust-building on-ramp between Conditional and Approval Required. "AI drafts your replies" alone is a commodity claim — sell only as the ladder rung. If the gate chain has no DRAFT output, that's a kernel vocabulary gap — file with Porter |
-| Critical-risk escalation | "Urgent — Safety Issue" | (a) Our surface | Not required | **NONE — do not sell as differentiation** (nearest mechanism #14 was ruled *not a moat*; flagged §4) | Corpus risk tier Critical (15 scenarios: gas smell, CO alarm, lockout, no power/water, property occupied, injury) demands **immediate escalation that bypasses the approval queue** — must be visually and verbally distinct from "Needs Your Attention". Ship for safety; market as table-stakes responsibility, not moat |
+| Execution mode: DRAFT | "Ready for you to send" | (a) Our surface | Not required | MOAT #1/#2 **only as a rung of the earned-autonomy ladder** — standalone framing on the clone-risk list (Atlas ruling, [CEN-10](/CEN/issues/CEN-10)) | Corpus default execution mode "Draft": Cendra prepares the reply, PM sends. The highest-volume supervised mode and the trust-building on-ramp. **Kernel mapping (CEN-10, code-verified):** product "Draft" = kernel `AutonomyState.OBSERVE` (`core/brain/autonomy/models.py`; ladder OBSERVE → SEMI_AUTO → AUTOPILOT, five-metric `PromotionGate`). Not a gate-chain output and not a kernel vocabulary gap — no Porter filing needed. "AI drafts your replies" alone is a commodity claim — sell only as the ladder rung |
+| Critical-risk escalation | "Urgent — Safety Issue" | (a) Our surface | Not required | **NONE — permitted no-claim surface** (Atlas ruling, [CEN-10](/CEN/issues/CEN-10); nearest mechanism #14 ruled *not a moat* in CEN-6) | Corpus risk tier Critical (15 scenarios: gas smell, CO alarm, lockout, no power/water, property occupied, injury) demands **immediate escalation that bypasses the approval queue** — must be visually and verbally distinct from "Needs Your Attention". Ship for safety; market as table-stakes responsibility, not moat. **Governance guard (CEN-10):** the bypass skips the approval queue, never the envelope — every critical escalation still writes a DecisionCase (#9) and passes the compliance monitor (#10) |
 | DecisionCase | Decision Card | (a) Our surface | Not required | MOAT #9 | Corpus product-surface name for a classified situation awaiting or recording a decision; the unit listed in "Needs Your Attention" and the unit of the compounding ledger |
-| Missing-info registry entry | Knowledge Gap | (a) Our surface | Not required | **NONE standalone — flagged §4**; candidate anchor MOAT #5 (epistemic store) pending Atlas ruling | Corpus surfaces unanswered property facts as "Knowledge Gap cards" (scenarios 433–434); resolving one feeds Property Knowledge. A gap-card list is cloneable; the defensible version is gaps emitted by calibrated abstention from the epistemic store |
+| Missing-info registry entry | Knowledge Gap | (a) Our surface | Not required | **Conditional anchor MOAT #4 + #5** (Atlas ruling, [CEN-10](/CEN/issues/CEN-10)) — no defensibility claim until the emission wiring lands (G2) | Corpus surfaces unanswered property facts as "Knowledge Gap cards" (scenarios 433–434); resolving one feeds Property Knowledge. A gap-card list is cloneable; the defensible version is gaps emitted by calibrated abstention (#4) into the epistemic store (#5) with decision-time provenance. CEN-10 code check: no gap-registry mechanism exists in the kernel today — the wiring is net-new G2 work; on the clone-risk list until it ships |
 | PatternRule candidate | Suggested Automation | (a) Our surface | Not required | MOAT #8 — **roadmap maturity**: promotion path unbuilt; never demo as live | Mined PM behavior awaiting approval before promotion; corpus surface name: "Learning Center" |
 | Outcome ledger entry | Performance Record | (a) Our surface | Not required | MOAT #9 | "Cendra handled 47 check-in queries this month — here's the outcome record" |
 | Criticality certificate | Action Receipt / Compliance Receipt | (a) Our surface | Not required | MOAT #3 + #10 — **receipts not minted today**; label "pending" in UI, never demo as live | Shown when operator requests audit |
@@ -132,32 +132,34 @@ The operator's first session should establish:
 
 ---
 
-## 3. License-Safe Scoping Column (Forge sign-off required — [CEN-9](/CEN/issues/CEN-9))
+## 3. License-Safe Scoping Column (record for the board-level license track)
 
-> This section is the authoritative license boundary. No rename or hide listed as **(b) Dify chrome** may be implemented without Forge architecture review and Forge sign-off in this column. Rows marked **Ruling Q*n*** are explicitly ambiguous and need a Forge ruling (questions enumerated below) before they can be treated as (a)/(c).
+> **Board direction (CEN-8 comment, 2026-06-11):** license compliance is handled at board level under an existing agreement; this section is retained as the engineering **record** of which actions touch Dify-owned surfaces, not as an implementation gate. The "Forge sign-off" and "Status" cells below predate the board direction and are kept for historical traceability — read them as scoping notes, not blockers. The **Ruling Q*n*** questions remain enumerated so the board's license track has a precise list of what was ambiguous.
+>
+> **One standing rule survives the de-gating:** rows whose action is *modifying Dify branding itself* (logo, "Powered by Dify" notices, Dify-branded nav text) are not executed by Cendra engineering — if/when those happen, they happen under the board's LangGenius arrangement.
 
 | Action | Target | Scope | Forge sign-off | Status |
 |---|---|---|---|---|
 | Rename "Workspace" → "Property Portfolio" | Cendra console nav label | (a) Our surface | Not required | Pending impl |
 | Rename "App" → "Automation" in operator UI | Cendra console | (a) Our surface | Not required | Pending impl |
 | Rename workflow canvas → "Guest Journey Builder" | Cendra brain UI layer (`web/**/brain/`) | (a) Our surface | Not required | Pending impl |
-| Hide Dify Studio nav from operator role | Cendra RBAC / role-gating | **Ambiguous — Ruling Q1** | **Ruling required before impl** | Parked for Forge |
-| Hide model/provider selection, plugin marketplace, Dify API keys from operator role | Cendra RBAC / role-gating | **Ambiguous — Ruling Q1** | **Ruling required before impl** | Parked for Forge |
+| Hide Dify Studio nav from operator role | Cendra RBAC / role-gating | **Ruling Q1** (record) | Board-owned | **Unblocked** — board direction 2026-06-11 |
+| Hide model/provider selection, plugin marketplace, Dify API keys from operator role | Cendra RBAC / role-gating | **Ruling Q1** (record) | Board-owned | **Unblocked** — board direction 2026-06-11 |
 | Rename Knowledge Base → "Property Knowledge" | Cendra console | (a) Our surface | Not required | Pending impl |
-| Surface curated templates as "Automation Templates" | Cendra Explore wrapper | (a) wrapper — **Ruling Q4** on Dify attribution inside | **Ruling required before impl** | Parked for Forge |
+| Surface curated templates as "Automation Templates" | Cendra Explore wrapper | (a) wrapper — **Ruling Q4** (record) | Board-owned | **Unblocked** — board direction 2026-06-11 |
 | Add Cendra logo to operator console | Cendra console header | (a) Our surface | Not required | Pending impl |
-| Remove or hide Dify logo from operator-facing console | Dify console chrome | **(b) Dify chrome** | **REQUIRED — do not implement without sign-off** | Blocked on LangGenius commercial agreement |
-| Remove "Powered by Dify" notices | Dify console chrome | **(b) Dify chrome** | **REQUIRED** | Blocked on LangGenius commercial agreement |
-| Rename Dify-branded console nav items (Studio, Explore, etc.) in Dify chrome | Dify console chrome | **(b) Dify chrome** | **REQUIRED** | Blocked on LangGenius commercial agreement |
-| Custom domain (Cendra URL, no Dify in address) | Infrastructure | (c) Neutral — **Ruling Q6** to confirm | Confirm via Q6 | Pending DNS config |
-| Custom color theme / CSS over Dify components | CSS overrides on our surface | (a) Our surface — boundary defined by **Ruling Q3** | **Ruling required for boundary** | Allowed in principle; must not touch Dify-trademark elements |
+| Remove or hide Dify logo from operator-facing console | Dify console chrome | **(b) Dify chrome** | Board-owned | **Not executed by Cendra engineering** — happens (if at all) under the board's LangGenius arrangement |
+| Remove "Powered by Dify" notices | Dify console chrome | **(b) Dify chrome** | Board-owned | **Not executed by Cendra engineering** — board's LangGenius arrangement |
+| Rename Dify-branded console nav items (Studio, Explore, etc.) in Dify chrome | Dify console chrome | **(b) Dify chrome** | Board-owned | **Not executed by Cendra engineering** — board's LangGenius arrangement |
+| Custom domain (Cendra URL, no Dify in address) | Infrastructure | (c) Neutral — **Ruling Q6** (record) | Board-owned | **Unblocked** — pending DNS config |
+| Custom color theme / CSS over Dify components | CSS overrides on our surface | (a) Our surface — **Ruling Q3** (record) | Board-owned | **Unblocked** — must not touch Dify-trademark elements (standing rule) |
 | Rename Cendra-owned workflow node labels | `web/**/brain/` components | (a) Our surface | Not required | |
 | Add "Needs Your Attention" banner (HITL surface) | Cendra console overlay | (a) Our surface | Not required | |
-| Serve multiple PM tenants from one Cendra deployment | Deployment architecture | **Ambiguous — Ruling Q2 (multi-tenant clause)** | **REQUIRED — blocks GA posture** | Parked for Forge; may require LangGenius commercial license regardless of branding |
+| Serve multiple PM tenants from one Cendra deployment | Deployment architecture | **Ruling Q2 (multi-tenant clause — record)** | Board-owned | **Unblocked for engineering** — board direction 2026-06-11; commercial-license question is the board's to settle |
 
-### Open License Questions for Forge ([CEN-9](/CEN/issues/CEN-9))
+### Open License Questions (board-owned record)
 
-These are the enumerated open questions Compass needs ruled before any **Ruling**-marked row is implemented. Each ruling should be recorded in this section and in the table above.
+These questions are no longer implementation gates — per board direction (2026-06-11) the license track is handled at board level. They are retained verbatim so the board has a precise enumeration of what was ambiguous; if the board records answers, note them here for traceability. Historical routing context: [CEN-9](/CEN/issues/CEN-9).
 
 - **Q1 — Role-gating Dify-branded surfaces.** Dify's license (Apache 2.0 with LangGenius additional conditions) restricts removing/modifying console branding. Operators never see Studio, Explore, model/provider settings, the plugin marketplace, or Dify API-key pages — but the surfaces are *hidden via RBAC*, not removed or modified, and remain intact for internal roles. Does role-gating constitute "removal" under the additional conditions? *Depends on it: the entire "Hide from Operators" table; the operator console posture for G3 design partners.*
 - **Q2 — Multi-tenant clause.** Cendra serves multiple independent PMs (tenants) from a shared deployment. Does this fall under the LangGenius additional condition restricting multi-tenant operation without a commercial license — even with all Dify branding intact? *Depends on it: GA deployment architecture; whether the LangGenius commercial agreement is a launch blocker rather than a branding nicety. This is the highest-stakes question in the list.*
@@ -166,15 +168,9 @@ These are the enumerated open questions Compass needs ruled before any **Ruling*
 - **Q5 — Non-console attribution obligations.** Do guest-facing messages, emails, embedded webapp chrome, or API responses generated through Dify carry any Dify attribution obligations? *(Note: EU AI Act Art. 50 transparency disclosure is a separate, Cendra-owned obligation — MOAT #10 — and is not affected by this ruling.)* *Depends on it: all guest-journey message templates; the embedded webapp decision.*
 - **Q6 — Custom domain.** Serving the Dify-based console under a Cendra domain with no Dify in the address — any license constraint? Provisionally scoped (c); confirm. *Depends on it: DNS/branding rollout.*
 
-### Forge Sign-Off Path
+### License Handling
 
-For any **(b) Dify chrome** or **Ruling Q*n*** item:
-
-1. Forge reviews the specific UI element against the Dify/LangGenius open-source license (Apache 2.0 + additional conditions) and any commercial agreement in place.
-2. Forge either: (a) confirms the action is license-safe as scoped, or (b) flags the item as requiring commercial agreement negotiation before implementation.
-3. Forge records the sign-off in [CEN-9](/CEN/issues/CEN-9) and updates §3 of this document (scope column + question list).
-
-> **Current status:** No LangGenius commercial agreement is in place. All **(b) Dify chrome** actions are blocked, and all **Ruling Q*n*** rows are parked, until Forge rules in [CEN-9](/CEN/issues/CEN-9).
+> **Current status (board direction, CEN-8 comment, 2026-06-11):** License compliance is owned and handled at board level under an existing agreement with/regarding LangGenius. Engineering and product work proceeds without per-item license sign-off; the prior Forge sign-off path ([CEN-9](/CEN/issues/CEN-9)) is superseded for gating purposes. Standing rule unaffected by this: Cendra engineering never modifies Dify branding elements (logo, attribution notices, Dify-branded nav text) — any such change is executed under the board's arrangement, not in our lanes.
 
 ---
 
@@ -184,10 +180,10 @@ Result of applying the [Moat Fit Map](./moat-fit-map.md) anchor test to every re
 
 - **Anchored differentiation (cite their MOAT row in the Differentiation column):** Guest Journey Automation/Builder (#1+#9), Cendra Assistant (#1+#4), Autonomy Policy (#1), Confidence Level (#2), Needs Your Attention / Smart Escalation (#4, #13), gate-output copy (#1/#4/#13), Decision Card (#9), Performance Record (#9), Action Receipt (#3+#10), Suggested Automation (#8), Teach Cendra (#7). Each carries the maturity caveat from the Moat Fit Map ruling — **never demo a `partial`/`planned` mechanism as live, and never advertise an autonomy level that hasn't cleared its promotion gate.**
 - **Usability renames (no differentiation claim, lens not applicable):** Property Portfolio, Automation, Property Document, Integration, AI Engine, Trigger, Scheduled Automation, Automation Blueprint, Activity Log, Data Fields, Automation Log, all journey-stage vocabulary.
-- **Flagged — no MOAT anchor, goes to Atlas's clone-risk list** (additions to [Moat Fit Map](./moat-fit-map.md) Part C / Atlas synthesis; Atlas adjudicates):
-  1. **Knowledge Gap cards** — a list of unanswered property facts is cloneable by any fork. Candidate anchor: MOAT #5 (epistemic store) + #4 (abstention emits the gap). Until Atlas rules and the wiring exists, ship the surface but make no defensibility claim.
-  2. **"Urgent — Safety Issue" critical escalation** — nearest mechanism (#14 compliance stack) was explicitly ruled *not a moat*. Ship it as table-stakes operator responsibility; never market it as differentiation.
-  3. **DRAFT-mode standalone framing** — "AI drafts your replies" is a commodity claim every inbox tool makes. Only the earned-autonomy ladder framing (Draft → Conditional → Autonomous, governed by #1/#2) is defensible. Marketing copy must always present Draft as a ladder rung.
+- **Flagged in CEN-8 — adjudicated by Atlas in [CEN-10](/CEN/issues/CEN-10) (2026-06-11).** All three Compass positions confirmed; canonical rulings live in the [Moat Fit Map](./moat-fit-map.md) "CEN-10 Clone-Risk Adjudication" + Part C rows:
+  1. **Knowledge Gap cards** — **conditional anchor assigned: MOAT #4 + #5.** Defensible only when gap cards are emitted by calibrated abstention into the epistemic store with decision-time provenance; code check found no kernel gap-registry today, so the surface stays on the clone-risk list (no defensibility claim) until the G2 emission wiring lands.
+  2. **"Urgent — Safety Issue" critical escalation** — **ruled a permitted no-claim surface.** Differentiation claims barred outright (not merely "at risk"); ship as table-stakes safety responsibility. Binding governance guard: the approval-queue bypass never bypasses ledger capture (#9) or compliance monitoring (#10).
+  3. **DRAFT-mode standalone framing** — **added to the clone-risk list; ladder framing mandatory.** "AI drafts your replies" standalone is forbidden in all copy. The permitted framing is code-real: Draft = kernel `AutonomyState.OBSERVE`, the entry rung of the per-workflow ladder OBSERVE → SEMI_AUTO → AUTOPILOT with five-metric promotion gating (#1/#2). The suspected kernel vocabulary gap is resolved — no Porter filing needed.
 - **Reaffirmed, already on Atlas's clone-risk list:** Property Knowledge (unanchored until MOAT #5 bi-temporal tagging, G2) and hand-crafted starter templates (commodity until MOAT #8 promotion powers the library — label "starter templates, not Cendra intelligence").
 
 ---
@@ -197,8 +193,8 @@ Result of applying the [Moat Fit Map](./moat-fit-map.md) anchor test to every re
 - Every terminology entry in this map that is sold as differentiation cites a [Moat Fit Map](./moat-fit-map.md) Part A mechanism (and Part C surface where one exists) in its Differentiation column. Entries marked **NONE** are on, or flagged for, Atlas's clone-risk list (§4).
 - If a hospitality term is added to this map without a Differentiation entry, it defaults to "usability rename — no defensibility claim allowed" until anchored.
 - The [Dify Capability Register](./dify-capability-register.md) §Console Surfaces table is the authoritative list of what Dify exposes; this map decides what Cendra shows, hides, or wraps around it. The Register's TABLE-STAKES rows must never be claimed as differentiation (Moat Fit Map Part B).
-- License rulings live in §3 and [CEN-9](/CEN/issues/CEN-9); product claims and demo-narrative limits live in the Moat Fit Map "Moat maturity ruling."
+- The license record lives in §3 (board-owned track, not a gate); product claims and demo-narrative limits live in the Moat Fit Map "Moat maturity ruling."
 
 ---
 
-*Update this document when: a new guest journey stage is added to the Packs scenario library; Forge rules a Q*n* or signs off a (b) item ([CEN-9](/CEN/issues/CEN-9)); Atlas adjudicates a §4 clone-risk flag; a new Brain mechanism surface is added; or the LangGenius license situation changes.*
+*Update this document when: a new guest journey stage is added to the Packs scenario library; the board records an answer to a §3 Q*n* question; Atlas adjudicates a §4 clone-risk flag; a new Brain mechanism surface is added; or the board's LangGenius arrangement changes.*
