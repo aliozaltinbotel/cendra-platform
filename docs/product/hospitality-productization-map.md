@@ -93,14 +93,14 @@
 | HITL queue | List of items needing operator decision, with context and recommended action | Needs Your Attention | (a) Our surface |
 | Outcome ledger summary | Monthly performance snapshot: actions taken, outcomes, revenue impact | Assistant Performance | (a) Our surface |
 | TrustMeter per automation | Confidence level for each active automation | Confidence Level | (a) Our surface |
-| Knowledge base viewer | Browse and update property documents | Property Knowledge | (a) Our surface — Cendra-built page. If implementation instead reuses the Dify KB console page, **Ruling Q3** applies before ship |
+| Knowledge base viewer | Browse and update property documents | Property Knowledge | (a) Our surface — Cendra-built page. If implementation instead reuses the Dify KB console page, note **Ruling Q3** in the §3 record (board-owned, not a gate) |
 | Automation template library | Curated and promoted workflow templates | Automation Templates | (a) wrapper — **Ruling Q4** on attribution inside the wrapper |
 | Integration status | Connected PMSs, channel managers, and external services | Integrations | (a) Our surface |
 | Compliance receipts | On-request audit log of autonomous actions | Action History / Receipts | (a) Our surface |
 
 ### Hide from Operators
 
-> Hiding is implemented as **role-gating** (the surface still exists for internal/dev roles, unmodified). Whether role-gating a Dify-branded surface counts as "removing" it under the LangGenius additional license conditions is **Ruling Q1** — the single ruling covers every row marked Q1 below.
+> Hiding is implemented as **role-gating** (the surface still exists for internal/dev roles, unmodified). Whether role-gating a Dify-branded surface counts as "removing" it under the LangGenius additional license conditions is **Ruling Q1** — recorded in §3 for the board-level license track. **Per board direction (2026-06-11), Q1 does not gate implementation: role-gating work proceeds.**
 
 | Surface | Reason | Scope |
 |---|---|---|
