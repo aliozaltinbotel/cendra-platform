@@ -33,6 +33,15 @@ cryptographic provenance hash and a calibrated promotion gate.
 
 from __future__ import annotations
 
+from core.brain.epistemic.as_of import (
+    DocumentValidity,
+    bitemporal_provenance,
+    document_validity,
+    kg_snapshot_ref,
+    parse_as_of,
+    validity_observation,
+    visible_as_of,
+)
 from core.brain.epistemic.models import (
     Belief,
     Observation,
@@ -62,6 +71,7 @@ __all__ = [
     "Belief",
     "BeliefPromotionGate",
     "BeliefStore",
+    "DocumentValidity",
     "InMemoryBeliefStore",
     "InMemoryObservationStore",
     "Observation",
@@ -70,7 +80,13 @@ __all__ = [
     "Provenance",
     "ProvenanceKind",
     "SuccessPredicate",
+    "bitemporal_provenance",
     "canonical_observation_payload",
+    "document_validity",
+    "kg_snapshot_ref",
     "observation_integrity_hash",
+    "parse_as_of",
     "predicate_truthy",
+    "validity_observation",
+    "visible_as_of",
 ]

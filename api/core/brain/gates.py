@@ -42,8 +42,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
+from core.brain.abstention.gap_registry import GapRecord, build_gap_record
 from core.brain.abstention.gate import AbstentionGate
-from core.brain.abstention.models import AbstentionVerdict
+from core.brain.abstention.models import AbstentionDecision, AbstentionVerdict
 from core.brain.certificates.cert import AutonomyCertificate
 from core.brain.certificates.verifier import CertificateVerifier, VerifyOutcome
 from core.brain.risk.gate import RiskGate
@@ -175,6 +176,10 @@ class PipelineRequest:
     autonomy_tier: str | None = None
     planner_style: str | None = None
     extra: Mapping[str, str] = field(default_factory=dict)
+    # Decision-time of the run (the inbound-event timestamp, CEN-15
+    # ruling §E1) — consumed by the gap-emission hook and the as-of
+    # retrieval path.  ``None`` falls back to the evaluation wall-clock.
+    inbound_event_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -226,12 +231,14 @@ class DecisionPipelineAdapter:
         certificate_verifier: CertificateVerifier,
         compliance_gate: ComplianceGate | None = None,
         audit_factory: Callable[[PipelineRequest, datetime], Any] | None = None,
+        gap_sink: Callable[[GapRecord], None] | None = None,
     ) -> None:
         self._compliance = compliance_gate
         self._abstention = abstention_gate
         self._risk = risk_gate
         self._certificate = certificate_verifier
         self._audit_factory = audit_factory
+        self._gap_sink = gap_sink
 
     def decide(
         self,
@@ -265,7 +272,7 @@ class DecisionPipelineAdapter:
                     moment=moment,
                 )
 
-        abstention_row = self._abstention_step(request=request)
+        abstention_row = self._abstention_step(request=request, moment=moment)
         trace.append(abstention_row)
         if abstention_row.verdict != AbstentionVerdict.PROCEED.value:
             return self._terminal(
@@ -340,16 +347,44 @@ class DecisionPipelineAdapter:
             rationale=result.rationale,
         )
 
-    def _abstention_step(self, *, request: PipelineRequest) -> GateOutcome:
+    def _abstention_step(self, *, request: PipelineRequest, moment: datetime) -> GateOutcome:
         decision = self._abstention.decide(
             tool_id=request.tool_id,
             model_confidence=request.model_confidence,
         )
+        self._emit_gap(request=request, decision=decision, moment=moment)
         return GateOutcome(
             gate=GateName.ABSTENTION,
             verdict=decision.verdict.value,
             rationale=decision.rationale,
         )
+
+    def _emit_gap(self, *, request: PipelineRequest, decision: AbstentionDecision, moment: datetime) -> None:
+        """Knowledge-gap emission hook (CEN-15 Part B, Moat #4 → #5).
+
+        Fires only when the abstention gate ABSTAINS (an
+        INSUFFICIENT_DATA verdict is a calibration shortfall, not a
+        knowledge gap) and only when a sink is wired.  Emission is
+        observe-posture side-channel evidence: a sink failure is logged
+        and swallowed — it must never change the chain's verdict.
+        """
+        if self._gap_sink is None:
+            return
+        gap = build_gap_record(
+            decision,
+            subject_ref=request.property_id,
+            run_id=request.extra.get("run_id", request.decision_id),
+            query=request.extra.get("query", request.rationale),
+            as_of=request.inbound_event_at or moment,
+            dispatched_at=moment,
+            missing_predicate=request.extra.get("missing_predicate"),
+        )
+        if gap is None:
+            return
+        try:
+            self._gap_sink(gap)
+        except Exception:
+            logger.exception("gap emission sink failed; verdict unaffected")
 
     def _risk_step(self, *, request: PipelineRequest) -> GateOutcome:
         decision = self._risk.decide(request.risk_samples)

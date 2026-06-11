@@ -33,6 +33,7 @@ from controllers.common.schema import (
 )
 from controllers.service_api import service_api_ns
 from controllers.service_api.wraps import validate_and_get_api_token, validate_app_token
+from core.brain.epistemic.as_of import parse_as_of
 from core.brain.policy.errors import OwnerPolicyCompileError
 from fields.base import ResponseModel
 from libs.helper import dump_response
@@ -41,6 +42,7 @@ from services.brain_gate_posture_service import (
     ObserveOnlyGatePostureWriteError,
 )
 from services.brain_governance_service import BrainGovernanceService
+from services.brain_knowledge_gap_service import BrainKnowledgeGapService
 
 _MAX_METRICS_WINDOW_DAYS = 90
 
@@ -175,13 +177,55 @@ class BrainRetrievalApi(Resource):
     def post(self, app_model, end_user=None):
         payload = request.get_json(force=True, silent=True) or {}
         setting = payload.get("retrieval_setting") or {}
+        # CEN-15 Part A: optional decision-time anchor.  Omitted →
+        # current belief (standard contract); unparseable → 400.
+        as_of = None
+        if payload.get("as_of") is not None:
+            try:
+                as_of = parse_as_of(payload["as_of"])
+            except ValueError as exc:
+                return {"message": str(exc)}, 400
         service = BrainGovernanceService(app_model.tenant_id)
         records = service.retrieve_memory(
             str(payload.get("query", "")),
             top_k=int(setting.get("top_k", 5)),
             score_threshold=float(setting.get("score_threshold", 0.0)),
+            as_of=as_of,
         )
         return {"records": records}
+
+
+@service_api_ns.route("/brain/knowledge-gaps/<string:property_id>")
+class BrainKnowledgeGapsApi(Resource):
+    @validate_app_token
+    def get(self, app_model, property_id: str, end_user=None):
+        """Knowledge Gap registry read (CEN-15 Part B contract).
+
+        The kernel registry is keyed on a vertical-neutral
+        ``subject_ref``; this surface applies the hospitality pack's
+        mapping (``property_id`` ⇄ ``subject_ref``) at the wire edge so
+        the published contract holds without leaking pack semantics
+        into the kernel.
+        """
+        dedup = request.args.get("dedup", "true").lower() != "false"
+        try:
+            view = BrainKnowledgeGapService(app_model.tenant_id).list_gaps(
+                property_id,
+                status=request.args.get("status", "open"),
+                dedup=dedup,
+            )
+        except ValueError as exc:
+            return {"message": str(exc)}, 400
+        gaps = []
+        for gap in view["gaps"]:
+            card = dict(gap)
+            card["property_id"] = card.pop("subject_ref")
+            gaps.append(card)
+        return {
+            "property_id": view["subject_ref"],
+            "as_of_now": view["as_of_now"],
+            "gaps": gaps,
+        }
 
 
 @service_api_ns.route("/brain/gate-posture")
