@@ -4,7 +4,11 @@
 :func:`evaluate_tool_dispatch` before every workflow tool invocation.
 This module deliberately sees only primitives (tenant/app/tool ids,
 conversation id) so the kernel-isolation contract holds — the adapter
-imports brain, never the reverse.
+imports brain, never the reverse.  Batch 5 adds the per-dispatch
+autonomy consult here as well: the runtime resolves the dispatch
+identity through the workflow-kind registry and folds the resulting
+OBSERVE / SEMI_AUTO / AUTOPILOT semantics into the final T1/T3
+decision without introducing a new touchpoint.
 
 Rollout is governed by ``BRAIN_GATES_MODE``:
 
@@ -43,6 +47,15 @@ from typing import Any, Final, NamedTuple
 from core.brain.abstention.calibrator import ConformalCalibrator
 from core.brain.abstention.gate import AbstentionGate
 from core.brain.abstention.protocols import InMemoryCalibrationStore
+from core.brain.autonomy import (
+    AutonomyEngine,
+    InMemoryAutonomyStore,
+    InMemoryWorkflowKindRegistry,
+    SQLAlchemyAutonomyStore,
+    SQLAlchemyWorkflowKindRegistry,
+    WorkflowKindRegistry,
+)
+from core.brain.autonomy.dispatch import DispatchAutonomy, DispatchSemantics, resolve_dispatch_autonomy
 from core.brain.certificates.policy import TierPolicy
 from core.brain.certificates.verifier import CertificateVerifier
 from core.brain.compliance.checks import DEFAULT_BUILTIN_CHECKS
@@ -50,6 +63,8 @@ from core.brain.compliance.monitor import ComplianceContext, ComplianceMonitor
 from core.brain.gates import (
     ComplianceVerdict,
     DecisionPipelineAdapter,
+    GateName,
+    GateOutcome,
     PipelineDecision,
     PipelineRequest,
     PipelineVerdict,
@@ -89,6 +104,7 @@ _PLACEHOLDER_KEY: Final[bytes] = b"cendra-batch4-placeholder-key-32"
 _lock = threading.Lock()
 _calibration_stores: dict[str, InMemoryCalibrationStore] = {}
 _adapters: dict[str, DecisionPipelineAdapter] = {}
+_autonomy_runtimes: dict[str, _AutonomyRuntime] = {}
 
 
 def _mode() -> str:
@@ -122,6 +138,13 @@ class GovernancePosture(NamedTuple):
     mode: str
     tenant_enabled: bool
     active: bool
+
+
+class _AutonomyRuntime(NamedTuple):
+    """Tenant-scoped autonomy collaborators for dispatch-time resolution."""
+
+    engine: AutonomyEngine
+    registry: WorkflowKindRegistry
 
 
 def governance_posture(tenant_id: str) -> GovernancePosture:
@@ -231,6 +254,57 @@ def _adapter_for(tenant_id: str) -> DecisionPipelineAdapter:
         return adapter
 
 
+def _build_autonomy_runtime(tenant_id: str) -> _AutonomyRuntime:
+    """Persistent stores when the Dify DB is ready; memory otherwise.
+
+    Mirrors the service-layer tenant wiring so the runtime consult uses the
+    same SQLAlchemy-backed autonomy store + workflow registry in live Flask
+    paths, while unit tests and pre-init execution keep the pure in-memory
+    fallback.
+    """
+    try:
+        from sqlalchemy.orm import sessionmaker
+
+        from extensions.ext_database import db
+
+        session_maker = sessionmaker(bind=db.engine, expire_on_commit=False)
+        return _AutonomyRuntime(
+            engine=AutonomyEngine(
+                store=SQLAlchemyAutonomyStore(session_maker=session_maker, tenant_id=tenant_id),
+            ),
+            registry=SQLAlchemyWorkflowKindRegistry(session_maker=session_maker, tenant_id=tenant_id),
+        )
+    except Exception:
+        return _AutonomyRuntime(
+            engine=AutonomyEngine(store=InMemoryAutonomyStore()),
+            registry=InMemoryWorkflowKindRegistry({}),
+        )
+
+
+def _autonomy_runtime_for(tenant_id: str) -> _AutonomyRuntime:
+    with _lock:
+        runtime = _autonomy_runtimes.get(tenant_id)
+        if runtime is None:
+            runtime = _build_autonomy_runtime(tenant_id)
+            _autonomy_runtimes[tenant_id] = runtime
+        return runtime
+
+
+def _dispatch_autonomy(
+    *,
+    tenant_id: str,
+    property_id: str,
+    dispatch_identity: str,
+) -> DispatchAutonomy:
+    runtime = _autonomy_runtime_for(tenant_id)
+    return resolve_dispatch_autonomy(
+        engine=runtime.engine,
+        registry=runtime.registry,
+        property_id=property_id,
+        dispatch_identity=dispatch_identity,
+    )
+
+
 class ShadowDispatch(NamedTuple):
     """Outcome of one gate-chain evaluation at the T1 tool-dispatch hook.
 
@@ -241,10 +315,70 @@ class ShadowDispatch(NamedTuple):
     chain did not run (gating off / tenant outside the allowlist), which
     readers treat as ``unknown``.  The chain is evaluated **once**, so the
     shadow verdict never diverges from the enforcement decision.
+    ``autonomy`` is the computed rung semantics returned only in enforce
+    mode so future touchpoints can bind on the signal without re-running
+    resolution; observe mode still audit-trails the same data inside the
+    shadow verdict only.
     """
 
     enforcement: PipelineDecision | None
     shadow: dict[str, Any] | None
+    autonomy: DispatchAutonomy | None
+
+
+def _autonomy_rationale(autonomy: DispatchAutonomy) -> str:
+    workflow = autonomy.workflow or "unresolved workflow"
+    if autonomy.semantics is DispatchSemantics.DRAFT_ONLY:
+        return f"{autonomy.rationale}; {workflow} remains draft-only at OBSERVE"
+    if autonomy.semantics is DispatchSemantics.HOLD:
+        return f"{autonomy.rationale}; {workflow} must enter the hold/approval path"
+    return autonomy.rationale
+
+
+def _autonomy_decision(
+    decision: PipelineDecision,
+    *,
+    autonomy: DispatchAutonomy,
+) -> PipelineDecision:
+    if autonomy.semantics is DispatchSemantics.PROCEED:
+        return decision
+
+    verdict = PipelineVerdict.BLOCKED if autonomy.semantics is DispatchSemantics.DRAFT_ONLY else PipelineVerdict.DEFER
+    rationale = _autonomy_rationale(autonomy)
+    return PipelineDecision(
+        verdict=verdict,
+        rationale=rationale,
+        gate_trace=decision.gate_trace
+        + (
+            GateOutcome(
+                gate=GateName.AUTONOMY,
+                verdict=autonomy.semantics.value,
+                rationale=rationale,
+            ),
+        ),
+        evaluated_at=decision.evaluated_at,
+        audit_record=decision.audit_record,
+    )
+
+
+def _decision_with_autonomy(
+    decision: PipelineDecision,
+    *,
+    autonomy: DispatchAutonomy,
+) -> PipelineDecision:
+    """Fold dispatch-time autonomy semantics into the runtime decision.
+
+    Hard refusals from compliance / certificate / abstention still win
+    outright.  The Batch 4 risk defer remains pass-through, so autonomy
+    must be applied *after* that edge is considered; otherwise an
+    OBSERVE/SEMI_AUTO workflow would accidentally slip through whenever
+    risk lacked samples.
+    """
+    if decision.verdict is not PipelineVerdict.PROCEED:
+        refusing_gate = decision.gate_trace[-1].gate if decision.gate_trace else None
+        if refusing_gate is not GateName.RISK:
+            return decision
+    return _autonomy_decision(decision, autonomy=autonomy)
 
 
 def _enforcement(decision: PipelineDecision, *, mode: str) -> PipelineDecision | None:
@@ -278,7 +412,7 @@ def evaluate_dispatch_with_shadow(
     """
     mode = _mode()
     if mode == _MODE_OFF or not tenant_id or not _tenant_enabled(tenant_id):
-        return ShadowDispatch(enforcement=None, shadow=None)
+        return ShadowDispatch(enforcement=None, shadow=None, autonomy=None)
 
     request = PipelineRequest(
         decision_id=uuid.uuid4().hex,
@@ -292,6 +426,11 @@ def evaluate_dispatch_with_shadow(
         handler_solver="workflow",
     )
     decision = _adapter_for(tenant_id).decide(request)
+    autonomy = _dispatch_autonomy(
+        tenant_id=tenant_id,
+        property_id=request.property_id,
+        dispatch_identity=tool_id,
+    )
     logger.info(
         "brain.gates mode=%s tenant=%s app=%s tool=%s verdict=%s rationale=%s",
         mode,
@@ -301,8 +440,30 @@ def evaluate_dispatch_with_shadow(
         decision.verdict.value,
         decision.rationale,
     )
-    shadow = serialize_shadow_verdict(decision, model_confidence=model_confidence)
-    return ShadowDispatch(enforcement=_enforcement(decision, mode=mode), shadow=shadow)
+    logger.info(
+        "brain.autonomy mode=%s tenant=%s app=%s tool=%s workflow=%s state=%s semantics=%s rationale=%s",
+        mode,
+        tenant_id,
+        app_id,
+        tool_id,
+        autonomy.workflow or "unresolved",
+        autonomy.state.value,
+        autonomy.semantics.value,
+        autonomy.rationale,
+    )
+    effective_decision = _decision_with_autonomy(decision, autonomy=autonomy)
+    shadow = serialize_shadow_verdict(effective_decision, model_confidence=model_confidence)
+    shadow["autonomy"] = {
+        "workflow": autonomy.workflow,
+        "state": autonomy.state.value,
+        "semantics": autonomy.semantics.value,
+        "rationale": autonomy.rationale,
+    }
+    return ShadowDispatch(
+        enforcement=_enforcement(effective_decision, mode=mode),
+        shadow=shadow,
+        autonomy=autonomy if mode == _MODE_ENFORCE else None,
+    )
 
 
 def evaluate_tool_dispatch(
@@ -363,3 +524,4 @@ def reset_gateway_state() -> None:
     with _lock:
         _calibration_stores.clear()
         _adapters.clear()
+        _autonomy_runtimes.clear()

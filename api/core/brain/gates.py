@@ -79,12 +79,13 @@ class PipelineVerdict(StrEnum):
 
 
 class GateName(StrEnum):
-    """Stable identifiers for the gates the adapter runs."""
+    """Stable identifiers for the gates the adapter or runtime emits."""
 
     COMPLIANCE = "compliance"
     ABSTENTION = "abstention"
     RISK = "risk"
     CERTIFICATE = "certificate"
+    AUTONOMY = "autonomy"
 
 
 @dataclass(frozen=True, slots=True)

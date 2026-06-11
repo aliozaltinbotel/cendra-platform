@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
 
+from core.brain.autonomy import (
+    AutonomyEngine,
+    AutonomyState,
+    InMemoryAutonomyStore,
+    InMemoryWorkflowKindRegistry,
+)
 from core.brain.gates import PipelineVerdict
 from core.brain.patterns.shadow_verdict import WOULD_ABSTAIN
 from core.brain.runtime_gateway import (
@@ -75,6 +82,21 @@ def test_enforce_defers_on_thin_calibration(monkeypatch):
 def test_outcome_recording_builds_calibration_until_proceed(monkeypatch):
     monkeypatch.setenv(GATES_MODE_ENV, "enforce")
     monkeypatch.setenv(GATES_TENANTS_ENV, TENANT)
+    engine = AutonomyEngine(store=InMemoryAutonomyStore())
+    engine.force_state(
+        property_id="app-1",
+        workflow="guest_reply",
+        state=AutonomyState.AUTOPILOT,
+        actor="pm:7",
+        reason="test fixture",
+    )
+    monkeypatch.setattr(
+        "core.brain.runtime_gateway._autonomy_runtime_for",
+        lambda tenant_id: SimpleNamespace(
+            engine=engine,
+            registry=InMemoryWorkflowKindRegistry({"guest_reply": ("send_message",)}),
+        ),
+    )
     for _ in range(40):
         record_tool_outcome(
             tenant_id=TENANT,
