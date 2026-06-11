@@ -98,13 +98,15 @@ class BrainGovernanceService:
     def trust_meter(self, property_id: str) -> dict[str, Any]:
         registry = SQLAlchemyWorkflowKindRegistry(session_maker=self._sessions, tenant_id=self._tenant_id)
         engine = AutonomyEngine(store=SQLAlchemyAutonomyStore(session_maker=self._sessions, tenant_id=self._tenant_id))
+        labels = registry.labels()  # kind -> operator-facing label (defaults to kind)
         view = TrustMeterService(engine=engine, workflows=registry.kinds()).for_property(property_id)
         return {
             "property_id": view.property_id,
             "generated_at": view.generated_at.isoformat(),
             "bands": [
                 {
-                    "workflow": band.workflow,
+                    "workflow": band.workflow,  # stable wire kind ID (rename = breaking)
+                    "label": labels.get(band.workflow) or band.workflow,  # never null
                     "state": band.state.value,
                     "sample_size": band.sample_size,
                     "success_rate": band.success_rate,
@@ -118,6 +120,7 @@ class BrainGovernanceService:
                 }
                 for band in view.bands
             ],
+            "labels": labels,  # full kind->label vocabulary for all enabled kinds
         }
 
     # ── owner policy ───────────────────────────────────────────── #

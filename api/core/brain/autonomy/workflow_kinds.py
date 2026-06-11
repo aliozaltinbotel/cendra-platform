@@ -49,17 +49,34 @@ class WorkflowKindRegistry(Protocol):
         """Map an ``event_type`` alias to its kind (``None`` = skip)."""
         ...
 
+    def labels(self) -> dict[str, str]:
+        """Map each kind to its operator-facing label.
+
+        Defaults a kind's label to the kind string itself when none is
+        registered, so callers never see a null label and the kernel
+        stays vocabulary-free.
+        """
+        ...
+
 
 class InMemoryWorkflowKindRegistry:
     """Mapping-backed :class:`WorkflowKindRegistry` for tests / packs.
 
     ``event_aliases`` maps each kind to the event-type strings that
     resolve to it; lookups are case-insensitive, mirroring the
-    reference's ``_EVENT_TYPE_MAP`` behaviour.
+    reference's ``_EVENT_TYPE_MAP`` behaviour.  ``labels`` (optional) maps
+    each kind to its operator-facing display name; missing entries fall
+    back to the kind string, so the ctor stays back-compatible with
+    existing ``event_aliases``-only callers.
     """
 
-    def __init__(self, event_aliases: Mapping[str, tuple[str, ...]]) -> None:
+    def __init__(
+        self,
+        event_aliases: Mapping[str, tuple[str, ...]],
+        labels: Mapping[str, str] | None = None,
+    ) -> None:
         self._kinds = tuple(event_aliases.keys())
+        self._labels = dict(labels or {})
         self._by_event: dict[str, str] = {}
         for kind, aliases in event_aliases.items():
             self._by_event[kind.lower()] = kind
@@ -73,6 +90,9 @@ class InMemoryWorkflowKindRegistry:
         if not event_type:
             return None
         return self._by_event.get(event_type.lower())
+
+    def labels(self) -> dict[str, str]:
+        return {kind: self._labels.get(kind) or kind for kind in self._kinds}
 
 
 def make_event_resolver(registry: WorkflowKindRegistry) -> WorkflowResolver:
