@@ -38,6 +38,16 @@ from core.brain.abstention.calibrator import (
     DEFAULT_MIN_SAMPLES,
     ConformalCalibrator,
 )
+from core.brain.abstention.gap_registry import (
+    AGGREGATE_RUN_ID_CAP,
+    GapRecord,
+    GapStatus,
+    GapStore,
+    InMemoryGapStore,
+    aggregate_gaps,
+    build_gap_record,
+    serialize_gap,
+)
 from core.brain.abstention.gate import (
     DEFAULT_WILSON_THRESHOLD,
     AbstentionGate,
@@ -71,6 +81,7 @@ from core.brain.abstention.split_conformal import (
 )
 
 __all__ = [
+    "AGGREGATE_RUN_ID_CAP",
     "DEFAULT_ALPHA",
     "DEFAULT_ALPHA_CONFORMAL",
     "DEFAULT_MAPIE_CONFORMITY_SCORE",
@@ -88,11 +99,18 @@ __all__ = [
     "ConformalCalibrator",
     "ConformalLabel",
     "ConformalSet",
+    "GapRecord",
+    "GapStatus",
+    "GapStore",
     "InMemoryCalibrationStore",
+    "InMemoryGapStore",
     "MapieAbstainGate",
     "MapieSplitConformalCalibrator",
     "NonConformityFn",
     "SplitConformalCalibrator",
+    "aggregate_gaps",
     "binary_inverse_confidence",
+    "build_gap_record",
     "empirical_conformal_quantile",
+    "serialize_gap",
 ]

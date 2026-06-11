@@ -9,6 +9,7 @@ Tenant-scoped throughout; sessions come from the Dify engine.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -31,6 +32,18 @@ logger = logging.getLogger(__name__)
 
 def _session_maker() -> sessionmaker:
     return sessionmaker(bind=db.engine, expire_on_commit=False)
+
+
+def _parse_meta_dt(value: Any) -> datetime | None:
+    """Lenient ISO parse over stored provenance values (None on junk)."""
+    if not isinstance(value, str) or not value:
+        return None
+    from core.brain.epistemic.as_of import parse_as_of
+
+    try:
+        return parse_as_of(value)
+    except ValueError:
+        return None
 
 
 def _pii_safe(text: str, detector: PIIDetector) -> str:
@@ -176,22 +189,97 @@ class BrainGovernanceService:
 
     # ── T6 retrieval (external knowledge loopback) ─────────────── #
 
-    def retrieve_memory(self, query: str, *, top_k: int = 5, score_threshold: float = 0.0) -> list[dict]:
+    def retrieve_memory(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        score_threshold: float = 0.0,
+        as_of: datetime | None = None,
+    ) -> list[dict]:
         """Serve brain semantic memory to Dify knowledge nodes (T6).
+
+        With ``as_of`` (the run's inbound-event timestamp, CEN-15
+        ruling §E1) only chunks visible at that decision-time are
+        returned — valid-time window contains ``as_of`` and the fact
+        was recorded by then.  Every record carries the bi-temporal
+        provenance block (``as_of_used`` / ``retrieved_at`` /
+        ``kg_snapshot_ref`` …); ``as_of`` omitted serves current belief
+        (standard behavior, ``as_of_used`` null).
 
         Degrades to an empty result when the embedding pod / Qdrant
         are unavailable — a knowledge node must never hard-fail on the
         brain tier.
         """
         try:
+            from core.brain.epistemic.as_of import bitemporal_provenance, kg_snapshot_ref, visible_as_of
             from core.brain.memory.semantic_memory import SemanticMemory
 
             memory = SemanticMemory(collection_name=f"brain_semantic_{self._tenant_id}")
             records = memory.search(query=query, top_k=top_k, score_threshold=score_threshold)
-            return [
-                {"content": r.text, "score": r.score, "title": r.metadata.get("title", ""), "metadata": r.metadata}
-                for r in records
-            ]
+            retrieved_at = datetime.now(UTC)
+            snapshot_ref = kg_snapshot_ref(f"tenant:{self._tenant_id}", as_of or retrieved_at)
+            results: list[dict] = []
+            for r in records:
+                provenance = bitemporal_provenance(
+                    r.metadata,
+                    as_of_used=as_of,
+                    retrieved_at=retrieved_at,
+                    snapshot_ref=snapshot_ref,
+                )
+                if as_of is not None and not visible_as_of(
+                    as_of=as_of,
+                    valid_from=_parse_meta_dt(provenance.get("valid_from")),
+                    valid_to=_parse_meta_dt(provenance.get("valid_to")),
+                    recorded_at=_parse_meta_dt(provenance.get("recorded_at")),
+                ):
+                    continue
+                results.append(
+                    {
+                        "content": r.text,
+                        "score": r.score,
+                        "title": r.metadata.get("title", ""),
+                        "metadata": provenance,
+                    }
+                )
+            return results
         except Exception:
             logger.exception("brain retrieval degraded to empty result")
             return []
+
+    def ingest_document_validity(
+        self,
+        *,
+        document_id: str,
+        doc_metadata: dict[str, Any] | None,
+        uploaded_at: datetime,
+    ) -> dict[str, Any]:
+        """Ingest a document's valid-time window into the epistemic store.
+
+        Index-time hook (CEN-15 Part A): normalises Dify ``doc_metadata``
+        ``valid_from``/``valid_to`` per the adjudicated ruling (missing
+        ``valid_from`` defaults to the upload date with an
+        unverified-window flag) and records it as an append-only
+        observation under ``doc:<document_id>:validity``.
+        """
+        from core.brain.epistemic.as_of import document_validity, validity_observation
+        from core.brain.epistemic.sa_store import SQLAlchemyObservationStore
+
+        validity = document_validity(
+            document_id=document_id,
+            doc_metadata=doc_metadata,
+            uploaded_at=uploaded_at,
+        )
+        observation = validity_observation(
+            validity,
+            recorded_at=datetime.now(UTC),
+            source_id=f"dify:doc_metadata:{document_id}",
+        )
+        SQLAlchemyObservationStore(session_maker=self._sessions, tenant_id=self._tenant_id).record(observation)
+        return {
+            "document_id": validity.document_id,
+            "valid_from": validity.valid_from.isoformat(),
+            "valid_to": validity.valid_to.isoformat() if validity.valid_to else None,
+            "valid_window_unverified": validity.unverified_window,
+            "observation_id": observation.observation_id,
+        }
