@@ -1,0 +1,12 @@
+# local build-context excludes for gcloud builds submit (untracked)
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+storage/
+logs/
+coverage*.xml
+coverage*.json
