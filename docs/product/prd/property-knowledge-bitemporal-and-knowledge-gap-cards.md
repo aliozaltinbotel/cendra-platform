@@ -1,10 +1,10 @@
 # PRD — Property Knowledge bi-temporal anchoring + Knowledge Gap cards (clone-risk remediation)
 
 > **Owner:** Compass (Product Lead)
-> **Status:** In review — Atlas accepts by merging
+> **Status:** Accepted — merged to `main` 2026-06-11 via the [CEN-37](/CEN/issues/CEN-37) adjudication (PR #14). Revised once by the [CEN-67](/CEN/issues/CEN-67) errata folding the CEN-37 + [CEN-15](/CEN/issues/CEN-15) rulings (this revision); §11 records the rulings.
 > **Date:** 2026-06-11
 > **Issue:** [CEN-21](/CEN/issues/CEN-21) · **Program:** [CEN-11](/CEN/issues/CEN-11) G2 slate, Wave 2
-> **Canonical inputs:** [`docs/product/moat-fit-map.md`](../moat-fit-map.md) on `main` (board-confirmed 2026-06-11, CEN-4 interaction `52576e43`); [CEN-10](/CEN/issues/CEN-10) clone-risk adjudication; CEN-15 engineering design (PR #11, pending Atlas adjudication — this PRD is consistent with it but stands alone).
+> **Canonical inputs:** [`docs/product/moat-fit-map.md`](../moat-fit-map.md) on `main` (board-confirmed 2026-06-11, CEN-4 interaction `52576e43`); [CEN-10](/CEN/issues/CEN-10) clone-risk adjudication; CEN-15 engineering design (PR #11, **accepted 2026-06-11**, board confirmation `bf3ca6c4`; kernel interface schemas published at [CEN-15 → kernel-interfaces](/CEN/issues/CEN-15#document-kernel-interfaces)).
 
 This PRD remediates the two clone-risk rows that the moat-fit map scopes as one family: **Property Knowledge** (unanchored productization) and **Knowledge Gap cards** (conditionally anchored, emission wiring missing). Both become defensible only when wired to Brain mechanisms #5 and #4+#5 respectively. Until each wiring ships, the surfaces ship with **no differentiation claim**.
 
@@ -64,7 +64,7 @@ Both jobs consume trust: the operator must be able to see *why* an answer or an 
 
 ### 4.3 Acceptance criteria — Property Knowledge
 
-- [ ] Every Property Knowledge doc type in the hospitality pack carries `valid_from`/`valid_to`; ingestion rejects docs without `valid_from`.
+- [ ] Every Property Knowledge doc type in the hospitality pack carries `valid_from`/`valid_to`; ingestion rejects **new** docs without `valid_from`. Migrated/existing corpora default `valid_from` to upload date and carry an **unverified-window** flag until the operator confirms the window (§11 ruling 3).
 - [ ] A guest-journey workflow answering "what are the quiet hours?" uses only docs whose valid window contains now (Rung 1).
 - [ ] Given a dispute about an event at time T, retrieval through the T6 loopback with `as_of = T` returns the docs in force at T, each carrying `{valid_from, valid_to, as_of, source_doc_id, asserted_at}` provenance (Rung 2).
 - [ ] A doc updated after T does **not** appear in an `as_of = T` reconstruction.
@@ -98,7 +98,7 @@ A Knowledge Gap card is **not** an unanswered-questions list. Each card is the d
 
 - [ ] A gap card is created **only** by the abstention gate's emission hook — there is no manual "add gap" path (manual notes are a different surface; mixing them would destroy the provenance claim).
 - [ ] Each card persists in the epistemic store with `as_of`, confidence, threshold, and `kg_snapshot_ref` populated.
-- [ ] Cards are readable per property via the kernel read API (`GET /v1/brain/knowledge-gaps/<property_id>`) and render in the console worklist.
+- [ ] Cards are readable via the kernel knowledge-gaps read API, whose contract is **kernel-neutral**: tenant-scoped with a **generic subject reference** — never a hospitality noun (binding [CEN-37](/CEN/issues/CEN-37) directive). The hospitality pack maps *property* onto the subject ref at the pack layer. Cards render in the console worklist.
 - [ ] Filling the missing doc transitions the card to `answered` and the answering doc is linked.
 - [ ] Zero defensibility claims anywhere in product copy until the emission wiring row reads `implemented` (CEN-10 ruling restated).
 
@@ -111,7 +111,7 @@ A Knowledge Gap card is **not** an unanswered-questions list. Each card is the d
 | As-of retrieval over bi-temporal KG | `POST /v1/brain/retrieval` (T6 loopback) over `kg_as_of.py` / `brain_epistemic` | **Yes** (map #5 `implemented`) — needs `as_of` request arg + provenance fields in the response (Platform ask P1) |
 | Calibrated abstention events | `AbstentionGate` in the `runtime_gateway` chain; calibration in `brain_calibration` (T5) | **Yes** (map #4 `implemented`) — needs the gap-emission hook (Platform ask P4) |
 | Gap registry storage | epistemic store (`brain_epistemic`; proposed `brain_gap` / `brain:gap:`) | **No — net-new** (Platform asks P4–P6) |
-| Gap read API | `GET /v1/brain/knowledge-gaps/<property_id>` (service_api/brain, mirroring the TrustMeter read-API pattern) | **No — net-new** (Platform ask P6) |
+| Gap read API | Kernel knowledge-gaps read API (service_api/brain, mirroring the TrustMeter read-API pattern; tenant-scoped + generic subject ref per the [CEN-37](/CEN/issues/CEN-37) kernel-neutrality directive — hospitality pack maps *property* → subject) | **No — net-new** (Platform ask P6) |
 | Decision-time stamped on runs and threaded to retrieval | kernel run context + Dify retrieve call | **No — net-new wiring** (Platform asks P2–P3) |
 
 ---
@@ -165,11 +165,11 @@ Capabilities this PRD needs that do not exist (or need extension). **For Atlas t
 | # | Ask | Layer | New or extend |
 |---|---|---|---|
 | P1 | `as_of` argument on the T6 External-Knowledge retrieve path (`POST /v1/brain/retrieval`) + bi-temporal provenance fields (`valid_from`, `valid_to`, `as_of`, `source_doc_id`, `asserted_at`) on every returned chunk | kernel (service_api/brain) | extend existing |
-| P2 | Decision-time `T` stamped on each run (inbound-event timestamp semantics — pending Atlas ruling on CEN-15 open question 1) and exposed to the retrieve call | kernel run context (T1/T3 hooks) | extend existing |
+| P2 | Decision-time `T` stamped on each run (inbound-event timestamp semantics — **ruled**, CEN-15 §E1; see §11 ruling 4) and exposed to the retrieve call | kernel run context (T1/T3 hooks) | extend existing |
 | P3 | Decision-time threading from the Dify run into the External-Knowledge retrieve request (`knowledge_retrieval_node.py`) + External-Knowledge binding & `valid_from`/`valid_to` date-metadata convention on Property Knowledge datasets | Dify side (Flow's lane per CEN-15 §C) | net-new wiring + config |
 | P4 | `GapRecord` emission hook at the abstention decision point in `core/brain/abstention/` (fires only on abstain; no new gate slot, chain order unchanged) | kernel | **net-new** |
 | P5 | Gap persistence in the epistemic store (`brain_gap` table / `brain:gap:` keyspace) with `status` lifecycle (`open`/`answered`/`dismissed`) and `kg_snapshot_ref` linkage | kernel | **net-new** |
-| P6 | Read API `GET /v1/brain/knowledge-gaps/<property_id>` with per-event storage, dedup-at-read presentation | kernel (service_api/brain) | **net-new** |
+| P6 | Kernel knowledge-gaps read API (tenant-scoped, generic subject ref — kernel-neutral per [CEN-37](/CEN/issues/CEN-37); pack maps *property* → subject) with per-event storage, dedup-at-read presentation (**ruled**, CEN-15 §E2) | kernel (service_api/brain) | **net-new** |
 | P7 | Valid-time ingest from Dify doc metadata into the epistemic store at index time | kernel document-ingest hook | extend existing |
 | P8 | Gap-card console surface consuming P6 (worklist, status transitions, link-to-answering-doc) | console (Pixel's lane, once P6 contract is published) | net-new surface, no core-edit |
 
@@ -184,8 +184,12 @@ Interface contract (per CEN-15): kernel publishes the retrieve-request schema in
 - Any HITL routing of abstentions to approval queues (map row #13, separate track).
 - LICENSE / branding — board-owned.
 
-## 11. Open product decisions
+## 11. Product decisions — ruled (errata 2026-06-11, [CEN-67](/CEN/issues/CEN-67))
 
-1. **Rung-1-first shipping** (CEN-15 open question 3): recommend shipping Rung 1 ahead of Rung 2, labeled strictly table-stakes ("always-current docs"), because expired-policy leakage is a real operator pain today and the copy rules above prevent over-claiming. Atlas to confirm with the CEN-15 adjudication.
-2. **Gap-card volume control:** per-event storage with dedup-at-read (recommended in CEN-15 open question 2) — product accepts; the worklist must group repeat gaps or operators with chatty properties will face card floods.
-3. **`valid_from` required at ingest** (acceptance criterion §4.3): strict-require vs. default-to-upload-date for migrated corpora. Recommendation: default existing docs to upload date with an "unverified window" badge; require explicit windows for new docs.
+Every decision this section previously held open is now closed by the [CEN-37](/CEN/issues/CEN-37) PRD adjudication and the [CEN-15](/CEN/issues/CEN-15) design acceptance (Atlas, board confirmation `bf3ca6c4`). Recorded here so the PRD stops advertising open decisions; the published contract these rulings bind is the [CEN-15 kernel interface schemas](/CEN/issues/CEN-15#document-kernel-interfaces).
+
+1. **Rung-1-first shipping — confirmed** (CEN-15 §E3). Rung 1 ("always-current docs") may ship in G2 ahead of Rung 2 **only** under the strict table-stakes label — never described as a moat. The §8 copy rules are unchanged and binding.
+2. **Gap-card volume control — confirmed** (CEN-15 §E2). Storage is per-event (one row per abstention); dedup happens **only at the read API**, keyed on the missing predicate, with `occurrences` / `first_seen_at` / `last_seen_at` aggregates. The console worklist consumes the deduped read (default `dedup=true`), so repeat gaps group instead of flooding the triage list.
+3. **`valid_from` at ingest — ruled.** Strict-require applies to **new** docs only. Migrated/existing corpora default `valid_from` to the upload date and carry an **unverified-window** flag until the operator confirms the window. §4.3 AC updated accordingly.
+4. **Decision-time semantics (asks P2–P3) — ruled** (CEN-15 §E1). `as_of` = the run's **inbound-event timestamp** (when the guest message arrived), not wall-clock at retrieval: a delayed or queued run reconstructs belief as of the event it answers. Provenance always carries the dispatch wall-clock alongside (`retrieved_at` on retrieve responses, `dispatched_at` on gap records), so both timelines stay auditable. `as_of` omitted degenerates to current-belief retrieval.
+5. **Kernel-neutral gap read API — binding directive** ([CEN-37](/CEN/issues/CEN-37)). The kernel contract identifies gaps by tenant + a **generic subject reference**; "property" is hospitality-pack vocabulary mapped onto the subject ref at the pack layer (no hospitality semantics in the kernel). §5.3, §6, and §9 P6 wording updated accordingly. Note: the CEN-15 schema doc v1 still writes `<property_id>` as the path token — the [CEN-28](/CEN/issues/CEN-28) kernel implementation binds it as the generic subject ref; flagged to Atlas with this errata.
