@@ -8,22 +8,29 @@ Two responsibilities (PORTING_MAP Batch 5):
 - **EU AI Act Art. 50 disclosure** — appends the locale-appropriate
   "you are interacting with an AI system" disclosure to outputs (once
   per text; the kernel's :func:`disclosure_for` falls back to English).
-- **PII redaction** — masks detected PII spans in user inputs and
-  model outputs using the kernel detector/redactor (MASK strategy; the
-  HASH strategy needs the per-tenant secret provider, Batch 5 service
-  wiring).
+- **PII redaction** — redacts detected PII spans in user inputs and
+  model outputs using the kernel detector/redactor. ``MASK`` stays the
+  safe default; ``HASH`` now resolves a tenant-scoped key through the
+  chassis custody contract so no moderation caller handles raw secrets.
 
 Config keys (set per app in the console's moderation settings):
 ``locale`` (default ``en``), ``redact_inputs`` / ``redact_outputs``
-(default true), ``disclose`` (default true).
+(default true), ``disclose`` (default true), and optional
+``redaction_strategy`` (``mask`` or ``hash``).
 """
 
+import logging
 from typing import Any, override
 
 from core.brain.compliance.art50_disclosure import disclosure_for
 from core.brain.compliance.pii_detector import PIIDetector
-from core.brain.compliance.redactor import redact
+from core.brain.compliance.redactor import RedactionStrategy, redact
 from core.moderation.base import Moderation, ModerationAction, ModerationInputsResult, ModerationOutputsResult
+from services.brain_custody_service import BrainCustodyError, BrainCustodyService
+
+logger = logging.getLogger(__name__)
+
+_HASH_REDACTION_PURPOSE = "moderation_pii_redaction"
 
 _detector = PIIDetector()
 
@@ -68,13 +75,35 @@ class CendraBrainModeration(Moderation):
         )
 
     @staticmethod
-    def _redact_text(text: str) -> str:
+    def _strategy(config: dict[str, Any]) -> RedactionStrategy:
+        raw = str(config.get("redaction_strategy", RedactionStrategy.MASK.value)).strip().lower()
+        try:
+            return RedactionStrategy(raw)
+        except ValueError:
+            logger.warning("cendra_brain moderation got unknown redaction_strategy=%r; falling back to mask", raw)
+            return RedactionStrategy.MASK
+
+    def _redact_text(self, text: str) -> str:
         if not text:
             return text
         matches = _detector.scan(text)
         if not matches:
             return text
-        return redact(text, matches)
+
+        strategy = self._strategy(self.config or {})
+        if strategy is RedactionStrategy.HASH:
+            try:
+                hash_key = BrainCustodyService().hash_key_for(self.tenant_id, _HASH_REDACTION_PURPOSE)
+            except BrainCustodyError:
+                logger.warning(
+                    "cendra_brain moderation could not resolve HASH redaction key for tenant=%s; using MASK",
+                    self.tenant_id,
+                    exc_info=True,
+                )
+            else:
+                return redact(text, matches, strategy, hash_secret=hash_key.key_bytes)
+
+        return redact(text, matches, RedactionStrategy.MASK)
 
     def _redact_value(self, value: Any) -> Any:
         if isinstance(value, str):
