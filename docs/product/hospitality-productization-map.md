@@ -1,6 +1,7 @@
 # Hospitality Productization Map
 
-> **Owner:** Compass (productization + hospitality UX) · **Domain grounding:** Packs (482 STR scenarios + journey stages)
+> **Owner:** Compass (productization + hospitality UX) · **Domain grounding:** Packs (473-scenario STR corpus + journey stages)
+> **Count note (Compass ruling, 2026-06-11):** the corpus catalog holds **473 scenario records across 9 journey stages** (469 carry the full classification template). The earlier "482" figure also counted the corpus doc's 9 numbered preamble sections; all product claims, demos, and G3 evidence packs cite **473**.
 > **License sign-off column:** Forge (architecture + license guardrail — must sign off before any rename touches Dify chrome)
 > **Cross-links:** [Dify Capability Register](./dify-capability-register.md) · [Moat Fit Map](./moat-fit-map.md)
 > **Last updated:** 2026-06-11
@@ -24,7 +25,7 @@
 
 ### Core Concepts
 
-> **Persona note (corpus grounding):** in the 482-scenario corpus the operator is the **PM (property manager)** — that is the term professional STR operators use for themselves. "Operator" in this doc = PM. The owner is a **separate persona** with their own request/approval/reporting flows (Stage 9: block dates, revenue questions, expense approvals), not a synonym for operator. The full cast is guest / PM / owner / cleaner / vendor.
+> **Persona note (corpus grounding):** in the 473-scenario corpus the operator is the **PM (property manager)** — that is the term professional STR operators use for themselves. "Operator" in this doc = PM. The owner is a **separate persona** with their own request/approval/reporting flows (Stage 9: block dates, revenue questions, expense approvals), not a synonym for operator. The full cast is guest / PM / owner / cleaner / vendor.
 
 | Generic Dify term | STR / Hospitality term | Scope | Forge signed? | Notes |
 |---|---|---|---|---|
@@ -32,7 +33,7 @@
 | App | Automation | (a) Our surface | Pending | "App" is too generic. Corpus-grounded: PMs say "automations"; they think in situations and decisions, not "experience flows" — dropped "Guest Experience Flow" as non-operator vocabulary |
 | Workflow | Guest Journey Automation | (a) Our surface | Pending | See crux test in Moat Fit Map — only MOAT-anchored workflows get this label |
 | Workflow canvas | Guest Journey Builder | (a) Our surface | Pending | Surface-level rename; the canvas is Dify, the Brain-wired nodes inside are MOAT |
-| Knowledge Base | Property Knowledge | (a) Our surface | Pending | House rules, amenity guides, local recs, pricing policy docs. Corpus surface name is "Property Brain" — pick one label and keep it consistent across console and onboarding |
+| Knowledge Base | Property Knowledge | (a) Our surface | Pending | House rules, amenity guides, local recs, pricing policy docs. **Resolved (Compass, 2026-06-11): "Property Knowledge" is the single label** across console, onboarding, and all three product docs; the corpus's "Property Brain" is retired as a surface name to avoid collision with the Brain Engine decision kernel |
 | Knowledge Base document | Property Document / House Rule | (a) Our surface | Pending | |
 | Agent | Cendra Assistant | (a) Our surface | Pending | The operator-facing AI agent; defensible because Brain gate strategy runs inside |
 | Agent strategy | Autonomy Policy | (a) Our surface | Pending | The gate chain config that governs how the assistant earns and expends trust |
@@ -59,7 +60,7 @@
 | Dify logo | (never shown to operators) | (b) Dify chrome | Must not modify | License requirement; only shown in internal/dev contexts |
 
 ### Guest Journey Stages → Operator Vocabulary
-*(Grounded in the Packs 482-scenario journey map. The corpus defines **9 stages**, not 8 — Upsell / Revenue is a stage of its own, with 41 scenarios. Stage labels below are the corpus's own labels; per-stage scenario counts in parentheses.)*
+*(Grounded in the Packs 473-scenario journey map. The corpus defines **9 stages**, not 8 — Upsell / Revenue is a stage of its own, with 41 scenarios. Stage labels below are the corpus's own labels; per-stage scenario counts in parentheses.)*
 
 | Journey Stage (corpus label) | Operator vocabulary in Cendra | Automations typically active |
 |---|---|---|
