@@ -1,0 +1,16 @@
+# CENDRA C8: build-context excludes for `gcloud builds submit` from the
+# repo root — the api image needs only api/, dify-agent/, deploy/.
+.git
+.github
+web/
+reference/
+docs/
+images/
+docker/volumes/
+api/.venv/
+api/storage/
+**/__pycache__/
+**/node_modules/
+*.pyc
+coverage*.xml
+coverage*.json

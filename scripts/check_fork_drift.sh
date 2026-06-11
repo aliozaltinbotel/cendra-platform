@@ -15,7 +15,8 @@ REGISTERED+='|api/core/workflow/nodes/agent_v2/|api/core/moderation/'
 REGISTERED+='|api/extensions/ext_celery.py|api/core/rag/retrieval/'
 REGISTERED+='|api/core/callback_handler/|docker/'
 REGISTERED+='|api/pyproject.toml|api/uv.lock|api/.ruff.toml|.dockerignore|Makefile|api/.importlinter'   # keep in sync with T/C tables
-REGISTERED+='|api/controllers/service_api/__init__.py|api/controllers/console/__init__.py)'
+REGISTERED+='|api/controllers/service_api/__init__.py|api/controllers/console/__init__.py'
+REGISTERED+='|.github/workflows/deploy-cendra-gcp.yml|deploy/|.gcloudignore|api/.gcloudignore)'
 
 VIOLATIONS=$(git diff --name-only "$BASE"..HEAD \
   | grep -Ev "$ALLOW" \

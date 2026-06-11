@@ -1,12 +1,22 @@
 # CD build: fork api image + Cloud Run wrapper, tagged by commit SHA.
+# BuildKit inline cache against the moving :main tag — when uv.lock is
+# unchanged the dependency layer (the slow part) is a cache hit.
 steps:
   - name: 'gcr.io/cloud-builders/docker'
     env: ['DOCKER_BUILDKIT=1']
-    args: ['build', '-f', 'api/Dockerfile',
-           '-t', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:${_TAG}',
-           '.']
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:${_TAG}']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker pull ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:main || true
+        docker build -f api/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:main \
+          -t ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:${_TAG} \
+          -t ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:main \
+          .
+        docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:${_TAG}
+        docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/dify-api-repo/dify-api:main
   - name: 'gcr.io/cloud-builders/docker'
     env: ['DOCKER_BUILDKIT=1']
     args: ['build', '-f', 'deploy/cloudrun/Dockerfile',
