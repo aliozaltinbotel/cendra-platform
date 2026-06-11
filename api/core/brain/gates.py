@@ -26,8 +26,12 @@ Batch 4 port notes:
   (PORTING_MAP) — both are optional seams here: a ``None`` compliance
   gate is skipped (chain position preserved), and ``audit_factory``
   defaults to ``None`` so ``PipelineDecision.audit_record`` stays
-  ``None`` until M5 lands.  The reference's PROCEED-must-carry-audit
-  invariant returns with Batch 5.
+  ``None``.  CEN-81 wires the live factory (the ``ReceiptEmitter``)
+  through ``runtime_gateway._adapter_for``; the factory receives the
+  full gate trace so the emitted record's signed bytes carry what was
+  decided and why.  The factory is fail-open by contract — it returns
+  ``None`` instead of raising, so PROCEED-with-``audit_record=None``
+  means *emission failed and was logged*, never silent loss.
 - ``action_kind`` is an opaque vertical-neutral string (certificates
   precedent, golden rule 4) — the reference typed it as
   ``CardActionKind``.
@@ -196,9 +200,10 @@ class PipelineRequest:
 class PipelineDecision:
     """Aggregate output of the adapter.
 
-    ``audit_record`` carries the Art.12 record once the Batch 5 audit
-    seam is wired; until then it is always ``None`` (the reference's
-    PROCEED-must-carry-audit invariant is reinstated with Batch 5).
+    ``audit_record`` carries the sealed Art.12 receipt envelope on
+    PROCEED when the audit seam is wired (CEN-81); ``None`` on
+    non-PROCEED verdicts, when no factory is configured, or when the
+    fail-open factory logged an emission failure.
     """
 
     verdict: PipelineVerdict
@@ -224,7 +229,7 @@ class DecisionPipelineAdapter:
         risk_gate: RiskGate,
         certificate_verifier: CertificateVerifier,
         compliance_gate: ComplianceGate | None = None,
-        audit_factory: Callable[[PipelineRequest, datetime], Any] | None = None,
+        audit_factory: Callable[[PipelineRequest, datetime, tuple[GateOutcome, ...]], Any] | None = None,
     ) -> None:
         self._compliance = compliance_gate
         self._abstention = abstention_gate
@@ -292,7 +297,7 @@ class DecisionPipelineAdapter:
                 moment=moment,
             )
 
-        audit = self._audit_factory(request, moment) if self._audit_factory is not None else None
+        audit = self._audit_factory(request, moment, tuple(trace)) if self._audit_factory is not None else None
         return PipelineDecision(
             verdict=PipelineVerdict.PROCEED,
             rationale="all gates passed",

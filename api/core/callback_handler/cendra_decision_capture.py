@@ -31,7 +31,7 @@ import os
 from collections.abc import Generator, Mapping
 from typing import Any
 
-from core.brain.patterns.shadow_verdict import SHADOW_KEY
+from core.brain.patterns.shadow_verdict import RECEIPT_REF_KEY, SHADOW_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,12 @@ def capture_tool_outcome(
     recorded under ``orchestrator_verdict[SHADOW_KEY]`` so the
     scored-decision-mix KPI is derivable from the ledger alone.  ``None``
     (pre-change rows / chain not run) leaves the row backward compatible.
+
+    When the shadow block carries a receipt reference (``RECEIPT_REF_KEY``,
+    attached on PROCEED when an Art. 12 receipt was emitted — CEN-81),
+    the dispatch outcome and this capture's ``case_id`` are stitched back
+    onto the persisted receipt row, first write wins.  Like the case
+    write, the stitch is best-effort and never affects the tool call.
     """
     if not _capture_enabled() or not tenant_id:
         return
@@ -113,6 +119,21 @@ def capture_tool_outcome(
             tenant_id=tenant_id,
         )
         store.store(case)
+
+        receipt_ref = (shadow_verdict or {}).get(RECEIPT_REF_KEY)
+        if isinstance(receipt_ref, Mapping) and receipt_ref.get("decision_id"):
+            from core.brain.compliance.art12_audit import SQLAlchemyArt12AuditLogger
+            from core.brain.compliance.receipt_emitter import OUTCOME_FAILURE, OUTCOME_SUCCESS
+
+            audit = SQLAlchemyArt12AuditLogger(
+                session_maker=sessionmaker(bind=db.engine, expire_on_commit=False),
+                tenant_id=tenant_id,
+            )
+            audit.stitch_outcome(
+                str(receipt_ref["decision_id"]),
+                case_id=case.case_id,
+                outcome_status=OUTCOME_SUCCESS if success else OUTCOME_FAILURE,
+            )
     except Exception:
         logger.exception("cendra decision capture failed (ignored)")
 

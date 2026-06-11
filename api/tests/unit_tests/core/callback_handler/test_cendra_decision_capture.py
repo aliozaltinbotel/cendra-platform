@@ -108,3 +108,77 @@ def test_instrument_stream_threads_shadow_on_success():
     )
     assert out == ["a", "b"]
     assert _CapturingStore.last_case.orchestrator_verdict[SHADOW_KEY] == shadow
+
+
+# ── T7 outcome stitch onto the emitted receipt (CEN-81) ──────────── #
+
+from core.brain.patterns.shadow_verdict import RECEIPT_REF_KEY
+
+
+class _CapturingAudit:
+    """Stand-in for SQLAlchemyArt12AuditLogger that records stitches."""
+
+    calls: list = []
+
+    def __init__(self, *, session_maker, tenant_id) -> None:
+        self._tenant_id = tenant_id
+
+    def stitch_outcome(self, decision_id, *, case_id, outcome_status) -> bool:
+        _CapturingAudit.calls.append((self._tenant_id, decision_id, case_id, outcome_status))
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _capture_audit(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core.brain.compliance.art12_audit.SQLAlchemyArt12AuditLogger",
+        _CapturingAudit,
+    )
+    _CapturingAudit.calls = []
+
+
+def test_capture_stitches_receipt_outcome_onto_emitted_record():
+    shadow = _shadow()
+    shadow[RECEIPT_REF_KEY] = {"decision_id": "dec-1", "record_digest": "00" * 32, "signed": False}
+    cap.capture_tool_outcome(
+        tenant_id=TENANT,
+        app_id="app-1",
+        tool_id="send_message",
+        conversation_id="conv-1",
+        dispatch_key="0:abc",
+        success=True,
+        shadow_verdict=shadow,
+    )
+    case = _CapturingStore.last_case
+    assert case is not None
+    assert _CapturingAudit.calls == [(TENANT, "dec-1", case.case_id, "success")]
+
+
+def test_capture_stitches_failure_outcome():
+    shadow = _shadow()
+    shadow[RECEIPT_REF_KEY] = {"decision_id": "dec-2", "record_digest": "00" * 32, "signed": True}
+    cap.capture_tool_outcome(
+        tenant_id=TENANT,
+        app_id="app-1",
+        tool_id="send_message",
+        conversation_id="conv-1",
+        dispatch_key="0:abc",
+        success=False,
+        detail="tool raised",
+        shadow_verdict=shadow,
+    )
+    assert _CapturingAudit.calls[-1][3] == "failure"
+
+
+def test_capture_without_receipt_ref_skips_stitch():
+    cap.capture_tool_outcome(
+        tenant_id=TENANT,
+        app_id="app-1",
+        tool_id="send_message",
+        conversation_id="conv-1",
+        dispatch_key="0:abc",
+        success=True,
+        shadow_verdict=_shadow(),
+    )
+    assert _CapturingStore.last_case is not None  # case still captured
+    assert _CapturingAudit.calls == []
