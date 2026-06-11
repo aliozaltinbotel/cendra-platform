@@ -72,6 +72,11 @@ class HandlerSolver(StrEnum):
     SMT = "smt"
     DETERMINISTIC = "deterministic"
     HITL = "hitl"
+    # Forward-fix (CEN-81): the T1 hook dispatches workflow tool calls,
+    # where the action is produced by the workflow orchestrator rather
+    # than any single solver above — recorded as its own kind so the
+    # regulator sees the true production path, not a coerced label.
+    WORKFLOW = "workflow"
 
 
 @dataclass(frozen=True, slots=True)

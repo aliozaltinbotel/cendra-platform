@@ -44,18 +44,29 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 __all__ = [
-    "SHADOW_VERDICT_SCHEMA",
+    "RECEIPT_REF_KEY",
     "SHADOW_KEY",
-    "WOULD_ACT",
-    "WOULD_ABSTAIN",
+    "SHADOW_VERDICT_SCHEMA",
     "UNKNOWN",
-    "serialize_shadow_verdict",
+    "WOULD_ABSTAIN",
+    "WOULD_ACT",
     "read_shadow_verdict",
+    "serialize_shadow_verdict",
     "verdict_of",
 ]
 
 SHADOW_VERDICT_SCHEMA: Final[int] = 1
 SHADOW_KEY: Final[str] = "shadow"
+
+RECEIPT_REF_KEY: Final[str] = "receipt"
+"""Optional additive key on the shadow block (CEN-81; schema stays 1).
+
+When the gate chain reached PROCEED and an Art. 12 receipt was emitted,
+the runtime gateway attaches ``{"decision_id", "record_digest",
+"signed"}`` under this key so the T7 capture can stitch the dispatch
+outcome / ``case_id`` back onto the persisted receipt row.  Absent on
+non-PROCEED verdicts, pre-CEN-81 rows, and failed emissions — readers
+treat absence as "no receipt"."""
 
 WOULD_ACT: Final[str] = "would_act"
 WOULD_ABSTAIN: Final[str] = "would_abstain"

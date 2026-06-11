@@ -22,8 +22,18 @@ comma-separated tenant allowlist (P2: *one* workspace runs
 
 Batch 5: the compliance monitor (Reg 2024/1028, GDPR Art. 22, HITL
 and never-AI checks) now occupies the chain's first slot via
-:class:`_MonitorComplianceGate`; the Art.12 audit factory remains a
-follow-up seam.  Calibration evidence lives in a per-process
+:class:`_MonitorComplianceGate`; the Art.12 audit factory is live
+(CEN-81): each tenant adapter carries a
+:class:`~core.brain.compliance.receipt_emitter.ReceiptEmitter` that
+mints + durably appends a receipt envelope on PROCEED.  Note the live
+posture honestly: generic tool dispatch supplies no risk samples, so
+the risk gate's INSUFFICIENT_DATA defer keeps the chain short of
+PROCEED today — receipts begin emitting when risk evidence flows at
+dispatch (planner work); nothing is emitted for pass-through
+dispatches, so no live-capability claim precedes a real PROCEED.
+Receipt signing is delegated through :func:`register_receipt_signer`
+(unsigned ``signed=false`` envelopes until the custody service
+registers).  Calibration evidence lives in a per-process
 :class:`InMemoryCalibrationStore` keyed by tenant; the persistent
 calibration store arrives with the Batch 5 service layer.  Risk samples
 are not available at generic tool dispatch, so the risk gate is
@@ -38,15 +48,19 @@ import logging
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from typing import Any, Final, NamedTuple
 
 from core.brain.abstention.calibrator import ConformalCalibrator
 from core.brain.abstention.gate import AbstentionGate
 from core.brain.abstention.protocols import InMemoryCalibrationStore
 from core.brain.certificates.policy import TierPolicy
+from core.brain.certificates.receipt import ReceiptEnvelope, ReceiptSigner
 from core.brain.certificates.verifier import CertificateVerifier
+from core.brain.compliance.art12_audit import Art12AuditLogger, InMemoryArt12AuditLogger
 from core.brain.compliance.checks import DEFAULT_BUILTIN_CHECKS
 from core.brain.compliance.monitor import ComplianceContext, ComplianceMonitor
+from core.brain.compliance.receipt_emitter import ReceiptEmitter
 from core.brain.gates import (
     ComplianceVerdict,
     DecisionPipelineAdapter,
@@ -54,7 +68,7 @@ from core.brain.gates import (
     PipelineRequest,
     PipelineVerdict,
 )
-from core.brain.patterns.shadow_verdict import serialize_shadow_verdict
+from core.brain.patterns.shadow_verdict import RECEIPT_REF_KEY, serialize_shadow_verdict
 from core.brain.risk.gate import RiskGate
 
 __all__ = [
@@ -68,6 +82,7 @@ __all__ = [
     "evaluate_tool_dispatch",
     "governance_posture",
     "record_tool_outcome",
+    "register_receipt_signer",
     "reset_gateway_state",
     "resolve_effective_governance_mode",
 ]
@@ -89,6 +104,24 @@ _PLACEHOLDER_KEY: Final[bytes] = b"cendra-batch4-placeholder-key-32"
 _lock = threading.Lock()
 _calibration_stores: dict[str, InMemoryCalibrationStore] = {}
 _adapters: dict[str, DecisionPipelineAdapter] = {}
+_audit_loggers: dict[str, InMemoryArt12AuditLogger] = {}
+_receipt_signer_factory: Callable[[str], ReceiptSigner | None] | None = None
+
+
+def register_receipt_signer(factory: Callable[[str], ReceiptSigner | None] | None) -> None:
+    """Install the per-tenant receipt-signer resolver (custody service, CEN-78).
+
+    The kernel never imports the service layer (kernel-isolation
+    contract), so the custody service injects itself here at wiring
+    time.  The resolver is consulted at *emission* time, so a key
+    provisioned after a tenant's adapter was cached starts signing
+    without a process restart.  Unregistered (the default) every
+    receipt is minted unsigned — ``signed=false``, never a fake
+    signature (CEN-14 PRD §2.5 honesty posture).
+    """
+    global _receipt_signer_factory
+    with _lock:
+        _receipt_signer_factory = factory
 
 
 def _mode() -> str:
@@ -216,16 +249,53 @@ def _calibration_store_for(tenant_id: str):
         return _calibration_stores.setdefault(tenant_id, InMemoryCalibrationStore())
 
 
+def _audit_logger_for(tenant_id: str) -> Art12AuditLogger:
+    """Durable Art.12 backend when the Dify DB is initialised; memory otherwise.
+
+    Mirrors :func:`_calibration_store_for` — unit tests and pre-init code
+    paths fall back to a per-process in-memory chain.
+    """
+    try:
+        from sqlalchemy.orm import sessionmaker
+
+        from core.brain.compliance.art12_audit import SQLAlchemyArt12AuditLogger
+        from extensions.ext_database import db
+
+        engine = db.engine  # raises outside an initialised Flask app
+        return SQLAlchemyArt12AuditLogger(
+            session_maker=sessionmaker(bind=engine, expire_on_commit=False),
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        return _audit_loggers.setdefault(tenant_id, InMemoryArt12AuditLogger(tenant_id=tenant_id))
+
+
+def _signer_provider_for(tenant_id: str) -> Callable[[], ReceiptSigner | None]:
+    """Late-binding signer resolution against the registered custody factory."""
+
+    def _resolve() -> ReceiptSigner | None:
+        factory = _receipt_signer_factory
+        return factory(tenant_id) if factory is not None else None
+
+    return _resolve
+
+
 def _adapter_for(tenant_id: str) -> DecisionPipelineAdapter:
     with _lock:
         adapter = _adapters.get(tenant_id)
         if adapter is None:
             store = _calibration_store_for(tenant_id)
+            emitter = ReceiptEmitter(
+                tenant_id=tenant_id,
+                audit_logger=_audit_logger_for(tenant_id),
+                signer_provider=_signer_provider_for(tenant_id),
+            )
             adapter = DecisionPipelineAdapter(
                 abstention_gate=AbstentionGate(calibrator=ConformalCalibrator(store=store)),
                 risk_gate=RiskGate(),
                 certificate_verifier=CertificateVerifier(signing_key=_PLACEHOLDER_KEY, policy=TierPolicy()),
                 compliance_gate=_MonitorComplianceGate(),
+                audit_factory=emitter.build,
             )
             _adapters[tenant_id] = adapter
         return adapter
@@ -302,6 +372,15 @@ def evaluate_dispatch_with_shadow(
         decision.rationale,
     )
     shadow = serialize_shadow_verdict(decision, model_confidence=model_confidence)
+    receipt = decision.audit_record
+    if isinstance(receipt, ReceiptEnvelope):
+        # Ride the emitted receipt's identity to the T7 capture so the
+        # outcome / case_id stitch back onto the persisted record.
+        shadow[RECEIPT_REF_KEY] = {
+            "decision_id": receipt.record.decision_id,
+            "record_digest": receipt.record_digest,
+            "signed": receipt.signed,
+        }
     return ShadowDispatch(enforcement=_enforcement(decision, mode=mode), shadow=shadow)
 
 
@@ -360,6 +439,9 @@ def record_tool_outcome(
 
 def reset_gateway_state() -> None:
     """Drop per-process gateway state (tests / config reload)."""
+    global _receipt_signer_factory
     with _lock:
         _calibration_stores.clear()
         _adapters.clear()
+        _audit_loggers.clear()
+        _receipt_signer_factory = None

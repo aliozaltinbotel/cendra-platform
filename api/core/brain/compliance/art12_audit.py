@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
@@ -32,6 +32,9 @@ from core.brain.compliance.art12_decision import (
     canonical_record,
 )
 from models.brain_receipt import BrainArt12Receipt
+
+if TYPE_CHECKING:
+    from core.brain.certificates.receipt import ReceiptEnvelope
 
 __all__ = [
     "Art12AuditLogger",
@@ -76,11 +79,51 @@ def _row_to_record(row: BrainArt12Receipt) -> Art12Decision:
     )
 
 
+def _row_to_envelope(row: BrainArt12Receipt) -> ReceiptEnvelope:
+    # Local import: certificates/__init__ imports receipt.py, which imports
+    # this package — a module-level import would deadlock package init.
+    from core.brain.certificates.receipt import ReceiptEnvelope
+
+    return ReceiptEnvelope(
+        record=_row_to_record(row),
+        record_digest=row.record_digest,
+        signed=row.signed,
+        key_id=row.key_id,
+        algorithm=row.algorithm,
+        signature_hex=row.signature_hex,
+    )
+
+
 class Art12AuditLogger(Protocol):
-    """Append-only backend for tenant-scoped :class:`Art12Decision` rows."""
+    """Append-only backend for tenant-scoped :class:`Art12Decision` rows.
+
+    Receipt emission (CEN-81) extended the contract beyond bare record
+    appends: an envelope-aware append that persists the signature
+    metadata alongside the record, an envelope getter for by-
+    ``decision_id`` idempotent replay, and the T7 outcome stitch.  The
+    chain semantics are unchanged — signature and outcome columns live
+    *outside* the canonical record, so digests stay stable.
+    """
 
     def append(self, record: Art12Decision) -> str:
         """Persist one record and return its chained digest."""
+        ...
+
+    def append_envelope(self, envelope: ReceiptEnvelope) -> str:
+        """Persist one sealed envelope; same chain/idempotency rules as append."""
+        ...
+
+    def get_envelope(self, decision_id: str) -> ReceiptEnvelope | None:
+        """Return the stored envelope for ``decision_id`` (``None`` when absent)."""
+        ...
+
+    def stitch_outcome(self, decision_id: str, *, case_id: str, outcome_status: str) -> bool:
+        """Join the T7 outcome back onto the emitted record (first write wins).
+
+        Returns ``True`` when the outcome is recorded (or an identical
+        stitch replays), ``False`` when the record is unknown or already
+        stitched with a conflicting outcome.
+        """
         ...
 
     def last_digest(self) -> str:
@@ -97,6 +140,8 @@ class InMemoryArt12AuditLogger:
         self._tenant_id = tenant_id
         self._records: dict[str, Art12Decision] = {}
         self._digests: dict[str, str] = {}
+        self._envelopes: dict[str, ReceiptEnvelope] = {}
+        self._outcomes: dict[str, tuple[str, str]] = {}
         self._tail = ART12_GENESIS_DIGEST
 
     def append(self, record: Art12Decision) -> str:
@@ -118,6 +163,27 @@ class InMemoryArt12AuditLogger:
         )
         return digest
 
+    def append_envelope(self, envelope: ReceiptEnvelope) -> str:
+        digest = self.append(envelope.record)
+        self._envelopes.setdefault(envelope.record.decision_id, envelope)
+        return digest
+
+    def get_envelope(self, decision_id: str) -> ReceiptEnvelope | None:
+        return self._envelopes.get(decision_id)
+
+    def stitch_outcome(self, decision_id: str, *, case_id: str, outcome_status: str) -> bool:
+        if decision_id not in self._records:
+            return False
+        existing = self._outcomes.get(decision_id)
+        if existing is not None:
+            return existing == (case_id, outcome_status)
+        self._outcomes[decision_id] = (case_id, outcome_status)
+        return True
+
+    def outcome_of(self, decision_id: str) -> tuple[str, str] | None:
+        """Test helper: the stitched ``(case_id, outcome_status)`` pair."""
+        return self._outcomes.get(decision_id)
+
     def last_digest(self) -> str:
         return self._tail
 
@@ -132,6 +198,34 @@ class SQLAlchemyArt12AuditLogger:
         self._tenant_id = tenant_id
 
     def append(self, record: Art12Decision) -> str:
+        return self._append(record, envelope=None)
+
+    def append_envelope(self, envelope: ReceiptEnvelope) -> str:
+        return self._append(envelope.record, envelope=envelope)
+
+    def get_envelope(self, decision_id: str) -> ReceiptEnvelope | None:
+        with self._session_maker() as session:
+            row = self._get_row(session, decision_id)
+            if row is None:
+                return None
+            return _row_to_envelope(row)
+
+    def stitch_outcome(self, decision_id: str, *, case_id: str, outcome_status: str) -> bool:
+        if not decision_id:
+            return False
+        with self._session_maker() as session:
+            row = self._get_row(session, decision_id)
+            if row is None:
+                return False
+            if row.outcome_status is not None:
+                return row.outcome_status == outcome_status and row.case_id == case_id
+            row.case_id = case_id
+            row.outcome_status = outcome_status
+            row.outcome_recorded_at = _to_naive(datetime.now(UTC))
+            session.commit()
+            return True
+
+    def _append(self, record: Art12Decision, *, envelope: ReceiptEnvelope | None) -> str:
         with self._session_maker() as session:
             existing = self._get_row(session, record.decision_id)
             if existing is not None:
@@ -157,6 +251,10 @@ class SQLAlchemyArt12AuditLogger:
                 extra=dict(record.extra),
                 prev_digest=record.prev_digest,
                 record_digest=digest,
+                signed=envelope.signed if envelope is not None else False,
+                key_id=envelope.key_id if envelope is not None else None,
+                algorithm=envelope.algorithm if envelope is not None else None,
+                signature_hex=envelope.signature_hex if envelope is not None else None,
             )
             session.add(row)
             try:

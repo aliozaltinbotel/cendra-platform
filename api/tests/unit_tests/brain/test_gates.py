@@ -93,7 +93,7 @@ def test_proceed_path_runs_all_gates_in_order():
         GateName.RISK,
     ]
     assert compliance.calls == 1
-    assert decision.audit_record is None  # audit seam unwired until Batch 5
+    assert decision.audit_record is None  # no audit_factory configured on this adapter
 
 
 def test_compliance_blocked_short_circuits_everything():
@@ -175,8 +175,8 @@ def test_audit_factory_seam_fires_on_proceed_only():
     sentinel = object()
     calls: list[tuple] = []
 
-    def factory(request, moment):
-        calls.append((request.decision_id, moment))
+    def factory(request, moment, gate_trace):
+        calls.append((request.decision_id, moment, gate_trace))
         return sentinel
 
     adapter = _adapter(audit_factory=factory)
@@ -186,6 +186,20 @@ def test_audit_factory_seam_fires_on_proceed_only():
     defer = adapter.decide(_request(risk_samples=()))
     assert defer.audit_record is None
     assert len(calls) == 1
+
+
+def test_audit_factory_receives_full_gate_trace():
+    traces: list[tuple] = []
+
+    def factory(request, moment, gate_trace):
+        traces.append(gate_trace)
+
+    decision = _adapter(audit_factory=factory).decide(_request())
+    assert decision.verdict is PipelineVerdict.PROCEED
+    # the factory sees exactly the trace the decision carries, so the
+    # emitted receipt's signed bytes record what was decided and why
+    assert traces == [decision.gate_trace]
+    assert {row.gate for row in traces[0]} >= {GateName.ABSTENTION, GateName.RISK}
 
 
 def test_request_validation():

@@ -142,3 +142,87 @@ def test_enforce_shadow_matches_bound_decision(monkeypatch):
     assert dispatch.enforcement.verdict is PipelineVerdict.DEFER
     assert dispatch.shadow["verdict"] == WOULD_ABSTAIN
     assert dispatch.shadow["pipeline_verdict"] == "defer"
+
+
+# ── receipt emission at PROCEED (CEN-81) ─────────────────────────── #
+#
+# Generic dispatch supplies no risk samples, so the live chain stops at
+# the risk gate's INSUFFICIENT_DATA defer today; these tests stub the
+# cached adapter's risk gate to reach PROCEED and exercise the seam.
+
+import types
+
+from core.brain import runtime_gateway as rg
+from core.brain.patterns.shadow_verdict import RECEIPT_REF_KEY
+from core.brain.risk.models import RiskVerdict
+from core.brain.runtime_gateway import register_receipt_signer
+
+
+def _thick_calibration() -> None:
+    for _ in range(40):
+        record_tool_outcome(
+            tenant_id=TENANT,
+            tool_id="send_message",
+            predicted_confidence=0.9,
+            success=True,
+        )
+
+
+def _stub_risk_proceed(tenant_id: str) -> None:
+    adapter = rg._adapter_for(tenant_id)
+    adapter._risk = types.SimpleNamespace(
+        decide=lambda samples: types.SimpleNamespace(
+            verdict=RiskVerdict.PROCEED, rationale="stubbed: risk evidence present"
+        )
+    )
+
+
+class _FakeSigner:
+    def sign_receipt(self, tenant_id: str, payload):
+        return {"key_id": "brk_ed25519_t", "algorithm": "Ed25519", "signature_hex": "ab" * 64}
+
+
+def test_proceed_emits_unsigned_receipt_and_rides_shadow(monkeypatch):
+    monkeypatch.setenv(GATES_MODE_ENV, "observe")
+    _thick_calibration()
+    _stub_risk_proceed(TENANT)
+
+    dispatch = evaluate_dispatch_with_shadow(
+        tenant_id=TENANT, app_id="app-1", tool_id="send_message", model_confidence=0.9
+    )
+    assert dispatch.enforcement is None  # observe never binds
+    assert dispatch.shadow["pipeline_verdict"] == "proceed"
+
+    receipt = dispatch.shadow[RECEIPT_REF_KEY]
+    assert receipt["signed"] is False  # no signer registered → honest unsigned
+
+    # the record is durably appended (in-memory fallback chain in unit tests)
+    audit = rg._audit_loggers[TENANT]
+    assert audit.last_digest() == receipt["record_digest"]
+    stored = audit.get_envelope(receipt["decision_id"])
+    assert stored is not None
+    assert stored.signed is False
+    assert stored.record.owner_id == TENANT
+
+
+def test_registered_signer_signs_receipts_late_bound(monkeypatch):
+    monkeypatch.setenv(GATES_MODE_ENV, "observe")
+    _thick_calibration()
+    _stub_risk_proceed(TENANT)  # adapter (and emitter) already cached...
+    register_receipt_signer(lambda tenant_id: _FakeSigner())  # ...key arrives after
+
+    dispatch = evaluate_dispatch_with_shadow(
+        tenant_id=TENANT, app_id="app-1", tool_id="send_message", model_confidence=0.9
+    )
+    receipt = dispatch.shadow[RECEIPT_REF_KEY]
+    assert receipt["signed"] is True
+    stored = rg._audit_loggers[TENANT].get_envelope(receipt["decision_id"])
+    assert stored is not None
+    assert stored.key_id == "brk_ed25519_t"
+
+
+def test_no_receipt_ref_when_chain_defers(monkeypatch):
+    monkeypatch.setenv(GATES_MODE_ENV, "observe")
+    dispatch = evaluate_dispatch_with_shadow(tenant_id=TENANT, app_id="app-1", tool_id="send_message")
+    assert dispatch.shadow is not None  # thin calibration → defer
+    assert RECEIPT_REF_KEY not in dispatch.shadow

@@ -74,6 +74,11 @@ from core.brain.compliance.pii_detector import (
     PIIMatch,
     PIIType,
 )
+from core.brain.compliance.receipt_emitter import (
+    OUTCOME_FAILURE,
+    OUTCOME_SUCCESS,
+    ReceiptEmitter,
+)
 from core.brain.compliance.redactor import RedactionStrategy, redact
 from core.brain.compliance.retention import (
     DataClass,
@@ -82,6 +87,8 @@ from core.brain.compliance.retention import (
 )
 
 __all__ = [
+    "OUTCOME_FAILURE",
+    "OUTCOME_SUCCESS",
     "AESGCMEncryptor",
     "Art12AuditLogger",
     "AuditEvent",
@@ -107,6 +114,7 @@ __all__ = [
     "PIIDetector",
     "PIIMatch",
     "PIIType",
+    "ReceiptEmitter",
     "RedactionStrategy",
     "RetentionManager",
     "RetentionPolicy",

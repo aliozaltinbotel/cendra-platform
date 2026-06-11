@@ -127,3 +127,87 @@ def test_tenant_tails_are_isolated(session_maker) -> None:
     assert b.last_digest() == b_digest
     assert a_digest != ART12_GENESIS_DIGEST
     assert b_digest != ART12_GENESIS_DIGEST
+
+
+# ── envelope persistence + T7 outcome stitch (CEN-81) ────────────── #
+
+
+def _envelope(record, *, signed=False, **sig):
+    from core.brain.certificates.receipt import ReceiptEnvelope
+
+    return ReceiptEnvelope(record=record, record_digest=record.chained_digest(), signed=signed, **sig)
+
+
+def test_append_envelope_persists_signature_metadata(session_maker) -> None:
+    logger = SQLAlchemyArt12AuditLogger(session_maker=session_maker, tenant_id=TENANT)
+    record = _record()
+    envelope = _envelope(
+        record,
+        signed=True,
+        key_id="brk_ed25519_test",
+        algorithm="Ed25519",
+        signature_hex="ab" * 64,
+    )
+
+    digest = logger.append_envelope(envelope)
+
+    stored = logger.get_envelope(record.decision_id)
+    assert stored is not None
+    assert stored.record_digest == digest
+    assert stored.signed is True
+    assert stored.key_id == "brk_ed25519_test"
+    assert stored.record == record  # canonical fields round-trip intact
+
+
+def test_unsigned_envelope_renders_unsigned(session_maker) -> None:
+    logger = SQLAlchemyArt12AuditLogger(session_maker=session_maker, tenant_id=TENANT)
+    logger.append_envelope(_envelope(_record()))
+
+    stored = logger.get_envelope("d1")
+    assert stored is not None
+    assert stored.signed is False
+    assert stored.key_id is None
+    assert stored.signature_hex is None
+
+
+def test_stitch_outcome_first_write_wins(session_maker) -> None:
+    logger = SQLAlchemyArt12AuditLogger(session_maker=session_maker, tenant_id=TENANT)
+    logger.append_envelope(_envelope(_record()))
+
+    assert logger.stitch_outcome("d1", case_id="case-1", outcome_status="success") is True
+    # identical replay is idempotent
+    assert logger.stitch_outcome("d1", case_id="case-1", outcome_status="success") is True
+    # conflicting re-stitch is refused, stored outcome unchanged
+    assert logger.stitch_outcome("d1", case_id="case-2", outcome_status="failure") is False
+
+    with session_maker() as session:
+        row = session.execute(
+            select(BrainArt12Receipt).where(
+                BrainArt12Receipt.tenant_id == TENANT,
+                BrainArt12Receipt.decision_id == "d1",
+            )
+        ).scalar_one()
+    assert (row.case_id, row.outcome_status) == ("case-1", "success")
+    assert row.outcome_recorded_at is not None
+
+
+def test_stitch_outcome_unknown_decision_returns_false(session_maker) -> None:
+    logger = SQLAlchemyArt12AuditLogger(session_maker=session_maker, tenant_id=TENANT)
+    assert logger.stitch_outcome("missing", case_id="case-1", outcome_status="success") is False
+
+
+def test_stitch_does_not_disturb_digest_chain(session_maker) -> None:
+    logger = SQLAlchemyArt12AuditLogger(session_maker=session_maker, tenant_id=TENANT)
+    first = logger.append_envelope(_envelope(_record(decision_id="d1")))
+    logger.stitch_outcome("d1", case_id="case-1", outcome_status="success")
+
+    second = logger.append_envelope(
+        _envelope(
+            _record(
+                decision_id="d2",
+                occurred_at=datetime(2026, 6, 11, 12, 1, tzinfo=UTC),
+                prev_digest=first,
+            )
+        )
+    )
+    assert logger.last_digest() == second
