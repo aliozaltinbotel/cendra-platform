@@ -24,13 +24,15 @@
 
 ### Core Concepts
 
+> **Persona note (corpus grounding):** in the 482-scenario corpus the operator is the **PM (property manager)** — that is the term professional STR operators use for themselves. "Operator" in this doc = PM. The owner is a **separate persona** with their own request/approval/reporting flows (Stage 9: block dates, revenue questions, expense approvals), not a synonym for operator. The full cast is guest / PM / owner / cleaner / vendor.
+
 | Generic Dify term | STR / Hospitality term | Scope | Forge signed? | Notes |
 |---|---|---|---|---|
 | Workspace | Property Portfolio | (a) Our surface | Pending | Maps to a single operator's set of managed properties |
-| App | Guest Experience Flow / Automation | (a) Our surface | Pending | "App" is too generic; operators think in guest journeys |
+| App | Automation | (a) Our surface | Pending | "App" is too generic. Corpus-grounded: PMs say "automations"; they think in situations and decisions, not "experience flows" — dropped "Guest Experience Flow" as non-operator vocabulary |
 | Workflow | Guest Journey Automation | (a) Our surface | Pending | See crux test in Moat Fit Map — only MOAT-anchored workflows get this label |
 | Workflow canvas | Guest Journey Builder | (a) Our surface | Pending | Surface-level rename; the canvas is Dify, the Brain-wired nodes inside are MOAT |
-| Knowledge Base | Property Knowledge | (a) Our surface | Pending | House rules, amenity guides, local recs, pricing policy docs |
+| Knowledge Base | Property Knowledge | (a) Our surface | Pending | House rules, amenity guides, local recs, pricing policy docs. Corpus surface name is "Property Brain" — pick one label and keep it consistent across console and onboarding |
 | Knowledge Base document | Property Document / House Rule | (a) Our surface | Pending | |
 | Agent | Cendra Assistant | (a) Our surface | Pending | The operator-facing AI agent; defensible because Brain gate strategy runs inside |
 | Agent strategy | Autonomy Policy | (a) Our surface | Pending | The gate chain config that governs how the assistant earns and expends trust |
@@ -39,6 +41,11 @@
 | Gate chain output: ABSTAIN | "I'm not sure — this needs you" | (a) Our surface | Pending | Calibrated abstention expressed in operator language |
 | Gate chain output: EXECUTE | "Acting now" | (a) Our surface | Pending | |
 | Gate chain output: REVIEW_REQUIRED | "Waiting for your approval" | (a) Our surface | Pending | |
+| Execution mode: DRAFT | "Ready for you to send" | (a) Our surface | Pending | **Missing from the original table.** Corpus default execution mode "Draft": Cendra prepares the reply, PM sends. The highest-volume supervised mode and the trust-building on-ramp between Conditional and Approval Required. If the gate chain has no DRAFT output, that's a kernel vocabulary gap — file with Porter |
+| Critical-risk escalation | "Urgent — Safety Issue" | (a) Our surface | Pending | Corpus risk tier Critical (15 scenarios: gas smell, CO alarm, lockout, no power/water, property occupied, injury) demands **immediate escalation that bypasses the approval queue** — must be visually and verbally distinct from "Needs Your Attention" |
+| DecisionCase | Decision Card | (a) Our surface | Pending | Corpus product-surface name for a classified situation awaiting or recording a decision; the unit listed in "Needs Your Attention" |
+| Missing-info registry entry | Knowledge Gap | (a) Our surface | Pending | Corpus surfaces unanswered property facts as "Knowledge Gap cards" (scenarios 433–434); resolving one feeds Property Knowledge |
+| PatternRule candidate | Suggested Automation | (a) Our surface | Pending | Mined PM behavior awaiting approval before promotion (Brain moat #8); corpus surface name: "Learning Center" |
 | Outcome ledger entry | Performance Record | (a) Our surface | Pending | "Cendra handled 47 check-in queries this month — here's the outcome record" |
 | Criticality certificate | Action Receipt / Compliance Receipt | (a) Our surface | Pending | Shown when operator requests audit |
 | LLMOps / observability | Activity Log | (a) Our surface | Pending | Internal ops only; not exposed to operators |
@@ -52,18 +59,21 @@
 | Dify logo | (never shown to operators) | (b) Dify chrome | Must not modify | License requirement; only shown in internal/dev contexts |
 
 ### Guest Journey Stages → Operator Vocabulary
-*(Grounded in the Packs 482-scenario journey map)*
+*(Grounded in the Packs 482-scenario journey map. The corpus defines **9 stages**, not 8 — Upsell / Revenue is a stage of its own, with 41 scenarios. Stage labels below are the corpus's own labels; per-stage scenario counts in parentheses.)*
 
-| Journey Stage | Operator vocabulary in Cendra | Automations typically active |
+| Journey Stage (corpus label) | Operator vocabulary in Cendra | Automations typically active |
 |---|---|---|
-| Pre-booking | Inquiry Handling, Availability Answers | Rate query response, instant booking acknowledgement |
-| Booking confirmation | Booking Confirmation, Upsell | Welcome message, early check-in offer, damage deposit collection |
-| Pre-arrival | Pre-arrival Sequence | House rule delivery, keycode dispatch, local guide send |
-| Check-in | Check-in Support | Keycode help, early arrival routing, HITL for special requests |
-| In-stay | In-stay Support | Maintenance escalation, amenity questions, noise complaint triage |
-| Checkout | Checkout Sequence | Late checkout offer, checkout instructions, review request |
-| Post-stay | Guest Recovery, Review Management | Review response, rebooking offer, complaint resolution |
-| Operations (cross-stay) | Operations Automation | Cleaning scheduling, restocking alerts, revenue reporting |
+| Pre-booking (50) | Inquiry Handling, Availability Answers | Rate & discount queries, amenity/area answers (parking, pets, pool, distances), inquiry risk screening (same-night, zero-review, off-platform payment asks) |
+| Booking confirmation (40) | Booking Confirmation | Welcome / "what happens next" message, guest profile completion (missing email, phone, arrival time), invoice requests, booking-change requests (guest count, pet, cot) |
+| Pre-arrival (61) | Pre-arrival Sequence | Check-in instruction timing, arrival-time collection & changes, keycode / Wi-Fi dispatch, security deposit chase, local guide send |
+| Check-in day (61) | Check-in Support | Keycode & lockbox help, property-not-ready routing, missing amenity at check-in, critical escalation (no power/water, gas smell, property occupied) |
+| During stay (84) | In-stay Support | Maintenance escalation, amenity questions, noise complaint triage, damage reports, lockout & safety escalation, refund-request routing to PM |
+| Upsell / revenue (41) | Revenue Opportunities | Early check-in & late checkout fees, stay extension, extra guest & pet fees, mid-stay cleaning, airport transfer, pool heating fee, damage deposit collection |
+| Check-out (40) | Checkout Sequence | Checkout instructions, key return, deposit return questions, damage dispute routing, cleaner damage / missing-item reports |
+| Post-stay (40) | Guest Recovery, Review Management | Review request & response, bad-review recovery, refund/compensation routing, rebooking & direct-booking offers, deposit return status |
+| Internal operations (52, cross-stay) | Operations Automation | Cleaner turnover & readiness tracking, vendor dispatch & SLA chase, owner requests (block dates, revenue questions), PMS/channel sync-conflict detection, knowledge-gap capture |
+
+> **Grounding corrections applied:** (1) Upsell / Revenue promoted to its own stage — the prior table folded "early check-in offer, damage deposit collection" into Booking confirmation and "late checkout offer" into Checkout; in the corpus all of these are Stage 6 (Upsell / Revenue) scenarios. (2) "Check-in" → "Check-in day" and "In-stay" → "During stay" to match corpus stage labels. (3) "Review request" moved from Checkout to Post-stay (corpus scenario 386). (4) Internal operations is not just cleaning/restocking/reporting — the corpus stage is dominated by vendor SLA workflows, owner requests, cleaner access/readiness, and PMS↔channel data conflicts.
 
 ---
 
@@ -101,7 +111,7 @@
 | Workflow node types (LLM, Code, HTTP, etc.) | Hidden behind named steps ("Send Message", "Check Availability", "Notify Cleaner") | (a) |
 | Variable editor | Data Fields | (a) |
 | Run logs | Automation Log | (a) |
-| Annotation / feedback | Guest Feedback Training | (a) |
+| Annotation / feedback | Teach Cendra | (a) — corpus surface name; the strong correction signal is the PM's edit of a draft, not guest feedback, so "Guest Feedback Training" mislabels the mechanism |
 
 ### Onboarding Framing
 
