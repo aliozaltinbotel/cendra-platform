@@ -44,7 +44,7 @@ scripts/check_fork_drift.sh      # drift check (wired to `make fork-drift`)
 | T3 | `api/core/workflow/nodes/agent_v2/` adapter | Inject gates + brain memory context into the agent loop |
 | T4 | `api/core/moderation/` (or zero-edit `Extensible` module) | Art. 50 disclosure + PII redaction on chat apps |
 | T5 | `api/extensions/ext_celery.py` | Additive `beat_schedule` entries for brain tasks |
-| T6 | `api/core/rag/retrieval/` | Register brain memory as a retrieval source for knowledge nodes |
+| T6 | `api/services/external_knowledge_service.py` | Register brain memory as a retrieval source for knowledge nodes; thread decision-time `as_of` into kernel-bound External-Knowledge requests (single choke point covering workflow-node and agent-tool retrieval paths) |
 | T7 | workflow/agent run completion events (`api/core/callback_handler/` area) | DecisionCase capture |
 | T8 | `docker/` compose + env | Qdrant sparse-vector config, brain env vars |
 
