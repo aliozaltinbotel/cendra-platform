@@ -17,7 +17,10 @@ from sqlalchemy.orm import sessionmaker
 from core.brain.autonomy.engine import AutonomyEngine
 from core.brain.autonomy.sa_store import SQLAlchemyAutonomyStore, SQLAlchemyWorkflowKindRegistry
 from core.brain.autonomy.trust_meter import TrustMeterService
+from core.brain.compliance import PIIDetector, redact
 from core.brain.patterns.case_store import SQLAlchemyDecisionCaseStore
+from core.brain.patterns.models import DecisionCase
+from core.brain.patterns.shadow_verdict import read_shadow_verdict, verdict_of
 from core.brain.policy.compiler import OwnerPolicyCompiler
 from core.brain.policy.parser import OwnerPolicyParser
 from extensions.ext_database import db
@@ -28,6 +31,57 @@ logger = logging.getLogger(__name__)
 
 def _session_maker() -> sessionmaker:
     return sessionmaker(bind=db.engine, expire_on_commit=False)
+
+
+def _pii_safe(text: str, detector: PIIDetector) -> str:
+    """Redact PII spans before message context leaves the kernel (T4).
+
+    The Decision Card surfaces guest/PM message text; it must never
+    carry raw identifiers (email, phone, national ID, IBAN …) into the
+    dashboard. Empty text short-circuits so we never pay a scan on the
+    common no-text case.
+    """
+    if not text:
+        return ""
+    return redact(text, detector.scan(text))
+
+
+def _serialize_case(case: DecisionCase, detector: PIIDetector) -> dict[str, Any]:
+    """Decision Card read model for ``GET /v1/brain/cases`` (CEN-45).
+
+    Exposes the kernel :class:`CaseOutcome` governance fields, the
+    PII-safe message context, and the observe-posture shadow verdict
+    (CEN-33) the Decision Card and dashboard summary tiles need
+    (CEN-19 PRD §4.1). Exposure only — every value is already carried on
+    the in-memory case (``CaseOutcome`` + ``orchestrator_verdict`` JSONB).
+
+    ``verdict`` is the act/abstain KPI bucket (``would_act`` /
+    ``would_abstain`` / ``unknown`` for pre-capture rows); ``confidence``
+    is the gate-chain confidence the shadow block recorded, or ``None``
+    when no shadow verdict was captured.
+    """
+    outcome = case.outcome
+    shadow = read_shadow_verdict(case.orchestrator_verdict)
+    return {
+        "case_id": case.case_id,
+        "stage": case.stage,
+        "scenario": case.scenario,
+        "property_id": case.property_id,
+        "decision": case.decision.action_type.value,
+        "successful": outcome.successful,
+        "human_overrode": outcome.human_overrode,
+        "resolution_type": outcome.resolution_type.value if outcome.resolution_type else None,
+        "revenue_impact": outcome.revenue_impact,
+        "approval_required": outcome.approval_required,
+        "approved": outcome.approved,
+        "conversation_id": case.reservation_id,
+        "message_text": _pii_safe(case.message_text, detector),
+        "response_text": _pii_safe(case.response_text, detector),
+        "verdict": verdict_of(case.orchestrator_verdict),
+        "confidence": shadow.get("confidence") if shadow else None,
+        "created_at": case.created_at.isoformat(),
+        "decision_at": case.decision_at.isoformat() if case.decision_at else None,
+    }
 
 
 class BrainGovernanceService:
@@ -114,19 +168,8 @@ class BrainGovernanceService:
     def list_cases(self, *, property_id: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
         store = SQLAlchemyDecisionCaseStore(session_maker=self._sessions, tenant_id=self._tenant_id)
         cases = store.search(property_id=property_id, limit=limit, offset=offset)
-        return [
-            {
-                "case_id": case.case_id,
-                "stage": case.stage,
-                "scenario": case.scenario,
-                "property_id": case.property_id,
-                "decision": case.decision.action_type.value,
-                "successful": case.outcome.successful,
-                "conversation_id": case.reservation_id,
-                "created_at": case.created_at.isoformat(),
-            }
-            for case in cases
-        ]
+        detector = PIIDetector()
+        return [_serialize_case(case, detector) for case in cases]
 
     # ── T6 retrieval (external knowledge loopback) ─────────────── #
 
