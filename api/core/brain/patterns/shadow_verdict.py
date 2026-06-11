@@ -1,5 +1,9 @@
-# CENDRA-HOOK(T7): shadow-verdict field shape for DecisionCase capture (CEN-33).
-"""Shadow-verdict field shape recorded in T7 DecisionCase capture.
+"""Shadow-verdict field shape recorded in T7 DecisionCase capture (CEN-33).
+
+Additive kernel module: it carries no touchpoint marker (those tag edited
+upstream lines inside registered touchpoints only).  The T7 hook lives in
+``core/callback_handler/cendra_decision_capture.py``; this file just
+defines the field shape it persists.
 
 **Observe posture only.**  Under ``BRAIN_GATES_MODE=observe`` the gate
 chain runs but never refuses a dispatch (see ``runtime_gateway``).  This

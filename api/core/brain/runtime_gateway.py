@@ -38,7 +38,7 @@ import logging
 import os
 import threading
 import uuid
-from typing import Final, NamedTuple
+from typing import Any, Final, NamedTuple
 
 from core.brain.abstention.calibrator import ConformalCalibrator
 from core.brain.abstention.gate import AbstentionGate
