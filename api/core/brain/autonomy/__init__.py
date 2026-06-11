@@ -15,6 +15,11 @@ in the reference for now (PORTING_MAP).
 
 from __future__ import annotations
 
+from core.brain.autonomy.dispatch import (
+    DispatchAutonomy,
+    DispatchSemantics,
+    resolve_dispatch_autonomy,
+)
 from core.brain.autonomy.engine import (
     AutonomyEngine,
     AutonomyStore,
@@ -62,6 +67,8 @@ __all__ = [
     "AutonomyStore",
     "Condition",
     "CriteriaProgress",
+    "DispatchAutonomy",
+    "DispatchSemantics",
     "InMemoryAutonomyStore",
     "InMemoryWorkflowKindRegistry",
     "InteractionSource",
@@ -80,5 +87,6 @@ __all__ = [
     "WorkflowMetrics",
     "WorkflowResolver",
     "make_event_resolver",
+    "resolve_dispatch_autonomy",
     "state_rank",
 ]
