@@ -18,13 +18,13 @@ workflow_kinds:
     label: Extra-Guest Fee
     event_aliases: [guest_count_mismatch, extra_person_fee, extra_fee]
   code_release:
-    label: Access Code Release
+    label: Access Code Delivery
     event_aliases: [send_access_code, access_code_request]
   orphan_night:
-    label: Orphan-Night Gap
+    label: Orphan Night
     event_aliases: [min_stay_exception]
   early_checkin:
-    label: Early Check-In
+    label: Early Check-in
     event_aliases: [early_checkin_request]
   late_checkout:
     label: Late Checkout
@@ -42,7 +42,7 @@ workflow_kinds:
     label: Discount Request
     event_aliases: [discount_handling]
   pattern_promotion:
-    label: Autonomy Promotion
+    label: Autonomy Review
     event_aliases: [pattern_promote, pattern_demote]
   daily_briefing:
     label: Daily Briefing
