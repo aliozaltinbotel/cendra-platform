@@ -1,6 +1,10 @@
 """Cendra brain service_api surface (Batch 5, additive package).
 
-Routes (service-token authenticated like every service_api route):
+Most routes stay service-token authenticated like the rest of
+``service_api``. The deliberate exception is the public receipt
+verification-key lookup in ``verification_keys.py``: exported receipts
+carry only ``key_id``, so third-party verification must be able to
+resolve the historical public key without a tenant-scoped token.
 
 - ``POST /v1/brain/retrieval`` — T6 external-knowledge loopback in
   Dify's External Knowledge Base API shape.
@@ -11,6 +15,8 @@ Routes (service-token authenticated like every service_api route):
 - ``GET/POST /v1/brain/policies/<owner_id>`` — owner-policy documents.
 - ``GET /v1/brain/cases`` — captured DecisionCases (audit).
 - ``GET /v1/brain/cases/metrics`` — bounded per-tenant accrual metrics.
+- ``GET /v1/brain/verification-keys/<key_id>`` — public verification-key lookup.
+- ``GET /v1/brain/verification-keys`` — tenant-authenticated verification-key inventory.
 """
 
 from datetime import date, datetime
@@ -291,3 +297,6 @@ class BrainCasesMetricsApi(Resource):
             workflow=query.workflow,
         )
         return dump_response(BrainCaseMetricsResponse, metrics), 200
+
+
+from . import verification_keys  # noqa: F401
