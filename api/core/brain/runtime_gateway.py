@@ -62,11 +62,14 @@ __all__ = [
     "GATES_TENANTS_ENV",
     "GovernancePosture",
     "ShadowDispatch",
+    "configured_governance_mode",
+    "configured_tenant_enabled",
     "evaluate_dispatch_with_shadow",
     "evaluate_tool_dispatch",
     "governance_posture",
     "record_tool_outcome",
     "reset_gateway_state",
+    "resolve_effective_governance_mode",
 ]
 
 logger = logging.getLogger(__name__)
@@ -132,6 +135,38 @@ def governance_posture(tenant_id: str) -> GovernancePosture:
     mode = _mode()
     enabled = _tenant_enabled(tenant_id) if tenant_id else False
     return GovernancePosture(mode=mode, tenant_enabled=enabled, active=mode != _MODE_OFF and enabled)
+
+
+def configured_governance_mode() -> str:
+    """Return the raw process-wide gate posture from ``BRAIN_GATES_MODE``."""
+    return _mode()
+
+
+def configured_tenant_enabled(tenant_id: str) -> bool:
+    """Return the legacy allowlist decision for ``tenant_id``."""
+    return _tenant_enabled(tenant_id) if tenant_id else False
+
+
+def resolve_effective_governance_mode(
+    *,
+    configured_mode: str,
+    tenant_enabled: bool,
+    override_mode: str | None,
+) -> tuple[str, str]:
+    """Combine config + explicit override into the runtime-effective posture."""
+    if configured_mode == _MODE_OFF:
+        return _MODE_OFF, "global_mode"
+    if override_mode == _MODE_OFF:
+        return _MODE_OFF, "tenant_override"
+    if configured_mode == _MODE_ENFORCE:
+        if tenant_enabled:
+            return _MODE_ENFORCE, "config_enforce"
+        return _MODE_OFF, "config_fallback"
+    if override_mode == _MODE_OBSERVE:
+        return _MODE_OBSERVE, "tenant_override"
+    if tenant_enabled:
+        return _MODE_OBSERVE, "config_fallback"
+    return _MODE_OFF, "config_fallback"
 
 
 class _MonitorComplianceGate:
