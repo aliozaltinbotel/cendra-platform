@@ -504,14 +504,15 @@ class DifyToolNodeRuntime(ToolNodeRuntimeProtocol):
         # off (default) keeps upstream behaviour; observe logs verdicts only;
         # enforce refuses non-PROCEED dispatches. See core/brain/gates.py,
         # core/brain/runtime_gateway.py and FORK_LEDGER.md.
-        from core.brain.runtime_gateway import evaluate_tool_dispatch
+        from core.brain.runtime_gateway import evaluate_dispatch_with_shadow
 
-        brain_decision = evaluate_tool_dispatch(
+        brain_dispatch = evaluate_dispatch_with_shadow(
             tenant_id=self._run_context.tenant_id,
             app_id=self._run_context.app_id,
             tool_id=tool.entity.identity.name,
             conversation_id=runtime_binding.conversation_id,
         )
+        brain_decision = brain_dispatch.enforcement
         if brain_decision is not None and brain_decision.verdict.value != "proceed":
             raise ToolRuntimeInvocationError(
                 f"refused by Cendra brain gates ({brain_decision.verdict.value}): {brain_decision.rationale}"
@@ -554,6 +555,10 @@ class DifyToolNodeRuntime(ToolNodeRuntimeProtocol):
             dispatch_key=(
                 f"{workflow_call_depth}:{hash(frozenset((str(k), str(v)) for k, v in tool_parameters.items()))}"
             ),
+            # CENDRA-HOOK(T7): the same dispatch's observe-posture shadow
+            # verdict (what enforce would have done) rides along to the
+            # DecisionCase ledger.  None in OBSERVE-off keeps rows unchanged.
+            shadow_verdict=brain_dispatch.shadow,
         )
 
     @override
