@@ -32,8 +32,10 @@ for module_name in RESOURCE_MODULES:
 
 # Ensure resource modules are imported so route decorators are evaluated.
 # Import other controllers
+# CENDRA C7: register the additive brain console package (FORK_LEDGER.md)
 from . import (
     apikey,
+    brain,  # noqa: F401
     extension,
     feature,
     human_input_form,

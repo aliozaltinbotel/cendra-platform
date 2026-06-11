@@ -59,10 +59,10 @@ Source of truth for what moves where, in which batch, and its status. Source pat
 
 | Source | Target | Notes | Status |
 |---|---|---|---|
-| `cognition_loops/{policy,trainer,sleep}.py` (+ `grpo.py` non-prod) | `api/core/brain/cognition/` + `api/tasks/brain_sleep.py` | Wire ACE/Memory-R1 inputs from message/agent events | TODO |
-| `continual_learning/` (recorder, grader, monthly_evaluator, skill_evolution, sop_parser) | `api/core/brain/cognition/continual/` | Beat-scheduled | TODO |
-| TrustMeter + policy editor + audit viewer UI | `web/**/brain/` | After service_api stable | TODO |
-| 482-scenario foundation doc + DSL vocab + tier defaults + workflow templates | `packs/hospitality/` | Content restructuring; seeds the WorkflowKind registry | TODO |
+| `cognition_loops/{policy,trainer,grpo,sleep}.py` | `api/core/brain/cognition/` + `api/tasks/brain_sleep.py` | grpo imports RewardSimulator back from friction (Batch 1 contract); event-feed wiring is the remaining runtime step | PORTED |
+| `continual_learning/` (all 7 modules) + closure (patterns validator/foundation_update, kg_deterministic_sync, evaluation protocol/llm_judge/golden_cases) | `api/core/brain/cognition/continual/` + `api/core/brain/evaluation/` | litellm sites seamed; asyncpg FoundationUpdate store dropped per rule 7 (SQLAlchemy impl with pipeline wiring) | PORTED |
+| TrustMeter + policy editor + audit viewer UI | `web/**/brain/` | Console API done (`controllers/console/brain/`, C7); the Next.js UI itself DEFERRED to a dedicated frontend session (web toolchain + design review) | API PORTED / UI DEFERRED |
+| 482-scenario foundation doc + DSL vocab + tier defaults + workflow templates | `packs/hospitality/` | foundation.md + scenarios.yaml (76 kinds) + existing yamls; `core/brain/packs.py` loader + seed_workflow_kinds registry seeding | PORTED |
 
 ## Batch 7 (optional/deferred)
 
