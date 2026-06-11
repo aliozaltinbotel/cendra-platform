@@ -344,6 +344,14 @@ class ExternalDatasetService:
             "metadata_condition": metadata_condition.model_dump() if metadata_condition else None,
         }
 
+        # CENDRA-HOOK(T6): thread the run's decision-time into kernel-bound retrieve
+        # requests as `as_of` (CEN-15 §E1 / CEN-27). Unset clock or non-kernel endpoint
+        # leaves the request byte-identical to upstream; third-party providers never
+        # see the field. Local import keeps the upstream import block untouched.
+        from services.brain_decision_clock import inject_as_of
+
+        inject_as_of(request_params, settings.get("endpoint"))
+
         response = ExternalDatasetService.process_external_api(
             ExternalKnowledgeApiSetting(
                 url=f"{settings.get('endpoint')}/retrieval",
