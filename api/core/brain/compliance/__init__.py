@@ -32,6 +32,11 @@ Example::
     redacted = redact("Mi DNI es 12345678Z, mi NIE Y1234567Z.", spans)
 """
 
+from core.brain.compliance.art12_audit import (
+    Art12AuditLogger,
+    InMemoryArt12AuditLogger,
+    SQLAlchemyArt12AuditLogger,
+)
 from core.brain.compliance.audit import (
     AuditEvent,
     AuditLogger,
@@ -78,6 +83,7 @@ from core.brain.compliance.retention import (
 
 __all__ = [
     "AESGCMEncryptor",
+    "Art12AuditLogger",
     "AuditEvent",
     "AuditLogger",
     "ConsentPurpose",
@@ -93,6 +99,7 @@ __all__ = [
     "EncryptionKeyProvider",
     "Encryptor",
     "EnvKeyProvider",
+    "InMemoryArt12AuditLogger",
     "InMemoryAuditLogger",
     "InMemoryConsentStore",
     "KeyDerivation",
@@ -103,6 +110,7 @@ __all__ = [
     "RedactionStrategy",
     "RetentionManager",
     "RetentionPolicy",
+    "SQLAlchemyArt12AuditLogger",
     "TierEraser",
     "TierExporter",
     "TierResult",
