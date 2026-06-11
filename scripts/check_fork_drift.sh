@@ -6,7 +6,7 @@ BASE="$(git merge-base upstream/main HEAD)"
 
 ALLOW='^(api/core/brain/|api/models/brain_|api/services/brain_|api/tasks/brain_'
 ALLOW+='|api/controllers/console/brain/|api/controllers/service_api/brain/'
-ALLOW+='|api/tests/unit_tests/brain/|api/migrations/versions/|web/.*/brain/'
+ALLOW+='|api/tests/unit_tests/brain/|api/tests/unit_tests/.*/test_cendra_|api/migrations/versions/|web/.*/brain/'
 ALLOW+='|packs/|reference/|scripts/check_fork_drift.sh'
 ALLOW+='|FORK_LEDGER.md|PORTING_MAP.md|CLAUDE.md|docs/upstream-CLAUDE.md|docs/draft-cendra-|\.fork-base-sha)'
 

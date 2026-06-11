@@ -7,9 +7,11 @@ from collections.abc import Iterator
 import pytest
 
 from core.brain.gates import PipelineVerdict
+from core.brain.patterns.shadow_verdict import WOULD_ABSTAIN
 from core.brain.runtime_gateway import (
     GATES_MODE_ENV,
     GATES_TENANTS_ENV,
+    evaluate_dispatch_with_shadow,
     evaluate_tool_dispatch,
     record_tool_outcome,
     reset_gateway_state,
@@ -106,3 +108,37 @@ def test_enforce_isolates_tenants(monkeypatch):
 def test_missing_tenant_is_passthrough(monkeypatch):
     monkeypatch.setenv(GATES_MODE_ENV, "enforce")
     assert _dispatch(tenant_id="") is None
+
+
+# ── shadow verdict (CEN-33): observe records what enforce would do ── #
+
+
+def test_off_mode_yields_no_shadow(monkeypatch):
+    monkeypatch.setenv(GATES_MODE_ENV, "off")
+    dispatch = evaluate_dispatch_with_shadow(tenant_id=TENANT, app_id="app-1", tool_id="send_message")
+    assert dispatch.enforcement is None
+    assert dispatch.shadow is None  # readers treat as unknown
+
+
+def test_observe_records_shadow_without_binding(monkeypatch):
+    monkeypatch.setenv(GATES_MODE_ENV, "observe")
+    dispatch = evaluate_dispatch_with_shadow(tenant_id=TENANT, app_id="app-1", tool_id="send_message")
+    # observe never refuses the dispatch...
+    assert dispatch.enforcement is None
+    # ...but the gate chain's would-be verdict is captured for the ledger
+    assert dispatch.shadow is not None
+    assert dispatch.shadow["verdict"] == WOULD_ABSTAIN  # thin calibration → defer
+    assert dispatch.shadow["pipeline_verdict"] == "defer"
+    assert dispatch.shadow["refusing_gate"] == "abstention"
+    assert dispatch.shadow["confidence"] == 1.0
+
+
+def test_enforce_shadow_matches_bound_decision(monkeypatch):
+    monkeypatch.setenv(GATES_MODE_ENV, "enforce")
+    monkeypatch.setenv(GATES_TENANTS_ENV, TENANT)
+    dispatch = evaluate_dispatch_with_shadow(tenant_id=TENANT, app_id="app-1", tool_id="send_message")
+    # single evaluation: the bound enforcement decision and the shadow agree
+    assert dispatch.enforcement is not None
+    assert dispatch.enforcement.verdict is PipelineVerdict.DEFER
+    assert dispatch.shadow["verdict"] == WOULD_ABSTAIN
+    assert dispatch.shadow["pipeline_verdict"] == "defer"

@@ -21,13 +21,13 @@ The single source of truth for how this fork diverges from upstream `langgenius/
 
 | ID | File | Marker count | Reason | PR | Last rebase verified |
 |----|------|-------------|--------|----|---------------------|
-| T1 | `api/core/workflow/node_runtime.py` | 2 | Gate chain around tool dispatch (BRAIN_GATES_MODE, default off) + outcome-capture stream wrapper | #4 | — |
+| T1 | `api/core/workflow/node_runtime.py` | 3 | Gate chain around tool dispatch (BRAIN_GATES_MODE, default off) + outcome-capture stream wrapper + T7-tagged handoff passing the dispatch's observe-posture shadow verdict to capture (CEN-33) | #4, #20 | — |
 | T2 | `api/core/workflow/node_factory.py` | 0 | No edit needed: the factory already constructs the runtime T1 hooks; row retained in case wrapped runtimes become necessary | #4 | — |
 | T3 | `api/core/workflow/nodes/agent_v2/…` | 2 | `cendra_brain_layer.py` (new file in registered dir) + one block in `agent_node._run`; prompt-context injection activates with Batch 5 store wiring | #4 | — |
 | T4 | `api/core/moderation/…` (target: zero-edit Extensible module) | 0 | Art. 50 disclosure + PII | — | — |
 | T5 | `api/extensions/ext_celery.py` | 0 | Additive beat_schedule entries | — | — |
 | T6 | zero-edit external-knowledge loopback (**decided Batch 4**: smaller rebase surface; in-cluster HTTP latency acceptable) | 0 by design | Brain memory served to knowledge nodes through Dify's External Knowledge Base API; the retrieval endpoint lands with the Batch 5 service layer at `api/controllers/service_api/brain/` (additive) | #4 | — |
-| T7 | `api/core/callback_handler/cendra_decision_capture.py` (new file in registered dir) | 1 | Idempotent DecisionCase capture + calibration feed on tool completion; conversation_id is the join key; invoked from the T1 stream wrapper | #4 | — |
+| T7 | `api/core/callback_handler/cendra_decision_capture.py` (new file in registered dir) | 1 | Idempotent DecisionCase capture + calibration feed on tool completion; conversation_id is the join key; invoked from the T1 stream wrapper. Observe-posture shadow verdict recorded under `orchestrator_verdict[shadow]` (CEN-33, additive — no migration) | #4, #20 | — |
 | T8 | `docker/envs/core-services/brain.env.example` (new) + 1 marked env_file entry in compose template + generated compose | 3 | BRAIN_* env surface (gates mode/tenants, embedding pod, hybrid retrieval flag); Qdrant sparse-vector collections are created code-side when hybrid is enabled | #4 | — |
 
 Every hooked block in code: `# CENDRA-HOOK(Tn): <reason>`. Rule: `git grep -c "CENDRA-HOOK"` totals must match this table.
@@ -43,6 +43,7 @@ Every hooked block in code: `# CENDRA-HOOK(Tn): <reason>`. Rule: `git grep -c "C
 | C5 | `CLAUDE.md` | Replaced with Cendra version; upstream copy moved to `docs/upstream-CLAUDE.md` | Batch 1 |
 | C6 | `api/controllers/service_api/__init__.py` | **One additive import line** registering the additive `service_api/brain` package (T6 retrieval, TrustMeter, policies, audit). Route registration of additive packages — flagged for review: if more controller surfaces need registration in Batch 6 (console), discuss whether this becomes a numbered touchpoint | Batch 5 |
 | C7 | `api/controllers/console/__init__.py` | One additive import line registering the additive console `brain` package (TrustMeter / policies / audit for the web UI). Same pattern as C6 — both flagged: consider a single registration touchpoint if more surfaces appear | Batch 6 |
+| C8 | `scripts/check_fork_drift.sh` | Allow Cendra-owned tests (`test_cendra_*`) in upstream-mirrored test dirs (e.g. `api/tests/unit_tests/core/callback_handler/test_cendra_decision_capture.py`), so a T-touchpoint test can live next to the upstream tests for the code it covers without tripping drift. Pattern matches only our `test_cendra_`-named files; upstream tests in the same dir stay guarded | #20 |
 
 ## Rebase log
 
@@ -61,7 +62,7 @@ BASE="$(git merge-base upstream/main HEAD)"
 
 ALLOW='^(api/core/brain/|api/models/brain_|api/services/brain_|api/tasks/brain_'
 ALLOW+='|api/controllers/console/brain/|api/controllers/service_api/brain/'
-ALLOW+='|api/tests/unit_tests/brain/|api/migrations/versions/|web/.*/brain/'
+ALLOW+='|api/tests/unit_tests/brain/|api/tests/unit_tests/.*/test_cendra_|api/migrations/versions/|web/.*/brain/'
 ALLOW+='|packs/|reference/|scripts/check_fork_drift.sh'
 ALLOW+='|FORK_LEDGER.md|PORTING_MAP.md|CLAUDE.md|docs/upstream-CLAUDE.md|docs/draft-cendra-|\.fork-base-sha)'
 

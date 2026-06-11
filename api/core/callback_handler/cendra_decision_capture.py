@@ -28,7 +28,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
+from typing import Any
+
+from core.brain.patterns.shadow_verdict import SHADOW_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +53,16 @@ def capture_tool_outcome(
     dispatch_key: str,
     success: bool,
     detail: str = "",
+    shadow_verdict: Mapping[str, Any] | None = None,
 ) -> None:
-    """Persist one tool outcome as a DecisionCase + calibration sample."""
+    """Persist one tool outcome as a DecisionCase + calibration sample.
+
+    ``shadow_verdict`` is the observe-posture gate-chain verdict (what
+    enforce would have done) computed at the T1 hook; when present it is
+    recorded under ``orchestrator_verdict[SHADOW_KEY]`` so the
+    scored-decision-mix KPI is derivable from the ledger alone.  ``None``
+    (pre-change rows / chain not run) leaves the row backward compatible.
+    """
     if not _capture_enabled() or not tenant_id:
         return
     try:
@@ -75,6 +86,10 @@ def capture_tool_outcome(
             success=success,
         )
 
+        orchestrator_verdict: dict[str, Any] = {"source": "t7_capture", "tool_id": tool_id}
+        if shadow_verdict is not None:
+            orchestrator_verdict[SHADOW_KEY] = dict(shadow_verdict)
+
         case = DecisionCase(
             case_id=_deterministic_case_id(tenant_id, dispatch_key, tool_id),
             stage="ops",
@@ -91,7 +106,7 @@ def capture_tool_outcome(
                 successful=success,
                 resolution_type=ResolutionType.AUTO_RESOLVED if success else ResolutionType.ESCALATED,
             ),
-            orchestrator_verdict={"source": "t7_capture", "tool_id": tool_id},
+            orchestrator_verdict=orchestrator_verdict,
         )
         store = SQLAlchemyDecisionCaseStore(
             session_maker=sessionmaker(bind=db.engine, expire_on_commit=False),
@@ -110,11 +125,15 @@ def instrument_tool_messages[T](
     tool_id: str,
     conversation_id: str | None,
     dispatch_key: str,
+    shadow_verdict: Mapping[str, Any] | None = None,
 ) -> Generator[T, None, None]:
     """Yield the tool's messages through; record the outcome at the end.
 
     Success = the stream exhausted without raising; any exception is
-    recorded as a failure and re-raised unchanged.
+    recorded as a failure and re-raised unchanged.  ``shadow_verdict`` —
+    the gate-chain verdict computed at the T1 hook for the same dispatch
+    — travels with the outcome so the captured DecisionCase records what
+    enforce would have done.
     """
     if not _capture_enabled():
         yield from messages
@@ -130,6 +149,7 @@ def instrument_tool_messages[T](
             dispatch_key=dispatch_key,
             success=False,
             detail=str(exc),
+            shadow_verdict=shadow_verdict,
         )
         raise
     capture_tool_outcome(
@@ -139,4 +159,5 @@ def instrument_tool_messages[T](
         conversation_id=conversation_id,
         dispatch_key=dispatch_key,
         success=True,
+        shadow_verdict=shadow_verdict,
     )

@@ -38,7 +38,7 @@ import logging
 import os
 import threading
 import uuid
-from typing import Final
+from typing import Any, Final, NamedTuple
 
 from core.brain.abstention.calibrator import ConformalCalibrator
 from core.brain.abstention.gate import AbstentionGate
@@ -54,11 +54,14 @@ from core.brain.gates import (
     PipelineRequest,
     PipelineVerdict,
 )
+from core.brain.patterns.shadow_verdict import serialize_shadow_verdict
 from core.brain.risk.gate import RiskGate
 
 __all__ = [
     "GATES_MODE_ENV",
     "GATES_TENANTS_ENV",
+    "ShadowDispatch",
+    "evaluate_dispatch_with_shadow",
     "evaluate_tool_dispatch",
     "record_tool_outcome",
     "reset_gateway_state",
@@ -161,25 +164,54 @@ def _adapter_for(tenant_id: str) -> DecisionPipelineAdapter:
         return adapter
 
 
-def evaluate_tool_dispatch(
+class ShadowDispatch(NamedTuple):
+    """Outcome of one gate-chain evaluation at the T1 tool-dispatch hook.
+
+    ``enforcement`` is what the touchpoint must act on (``None`` →
+    proceed unchanged; a non-PROCEED :class:`PipelineDecision` → refuse).
+    ``shadow`` is the serialised observe-posture verdict — *what enforce
+    would have done* — for the T7 DecisionCase ledger; ``None`` when the
+    chain did not run (gating off / tenant outside the allowlist), which
+    readers treat as ``unknown``.  The chain is evaluated **once**, so the
+    shadow verdict never diverges from the enforcement decision.
+    """
+
+    enforcement: PipelineDecision | None
+    shadow: dict[str, Any] | None
+
+
+def _enforcement(decision: PipelineDecision, *, mode: str) -> PipelineDecision | None:
+    """Map a computed decision to the touchpoint's enforcement value."""
+    if mode == _MODE_OBSERVE:
+        return None
+    # Batch 4 enforce posture: risk samples are unavailable at generic
+    # dispatch, so a risk INSUFFICIENT_DATA defer must not break every
+    # tool call — only abstention/certificate/compliance verdicts bind.
+    if decision.verdict is not PipelineVerdict.PROCEED and decision.gate_trace[-1].gate.value == "risk":
+        logger.info("brain.gates risk gate lacks samples at dispatch — passing through (Batch 4)")
+        return None
+    return decision
+
+
+def evaluate_dispatch_with_shadow(
     *,
     tenant_id: str,
     app_id: str,
     tool_id: str,
     conversation_id: str | None = None,
     model_confidence: float = 1.0,
-) -> PipelineDecision | None:
-    """Run the gate chain for one tool dispatch.
+) -> ShadowDispatch:
+    """Run the gate chain once; return enforcement + shadow verdict.
 
-    Returns ``None`` when gating is off (or the tenant is outside the
-    allowlist) **and** in observe mode after logging — callers treat
-    ``None`` as "proceed unchanged".  In enforce mode the full
-    :class:`PipelineDecision` comes back and non-PROCEED verdicts must
-    refuse the dispatch.
+    The shadow verdict is recorded for **both** would-permit and
+    would-refuse dispatches whenever the chain runs (observe or enforce),
+    so the T7 ledger carries the scored-decision-mix.  Enforcement still
+    obeys the mode: observe never binds, enforce binds non-PROCEED
+    (except the Batch 4 risk pass-through).
     """
     mode = _mode()
     if mode == _MODE_OFF or not tenant_id or not _tenant_enabled(tenant_id):
-        return None
+        return ShadowDispatch(enforcement=None, shadow=None)
 
     request = PipelineRequest(
         decision_id=uuid.uuid4().hex,
@@ -202,15 +234,34 @@ def evaluate_tool_dispatch(
         decision.verdict.value,
         decision.rationale,
     )
-    if mode == _MODE_OBSERVE:
-        return None
-    # Batch 4 enforce posture: risk samples are unavailable at generic
-    # dispatch, so a risk INSUFFICIENT_DATA defer must not break every
-    # tool call — only abstention/certificate/compliance verdicts bind.
-    if decision.verdict is not PipelineVerdict.PROCEED and decision.gate_trace[-1].gate.value == "risk":
-        logger.info("brain.gates risk gate lacks samples at dispatch — passing through (Batch 4)")
-        return None
-    return decision
+    shadow = serialize_shadow_verdict(decision, model_confidence=model_confidence)
+    return ShadowDispatch(enforcement=_enforcement(decision, mode=mode), shadow=shadow)
+
+
+def evaluate_tool_dispatch(
+    *,
+    tenant_id: str,
+    app_id: str,
+    tool_id: str,
+    conversation_id: str | None = None,
+    model_confidence: float = 1.0,
+) -> PipelineDecision | None:
+    """Run the gate chain for one tool dispatch (enforcement value only).
+
+    Returns ``None`` when gating is off (or the tenant is outside the
+    allowlist) **and** in observe mode after logging — callers treat
+    ``None`` as "proceed unchanged".  In enforce mode the full
+    :class:`PipelineDecision` comes back and non-PROCEED verdicts must
+    refuse the dispatch.  Callers that also need the observe-posture
+    shadow verdict for T7 capture use :func:`evaluate_dispatch_with_shadow`.
+    """
+    return evaluate_dispatch_with_shadow(
+        tenant_id=tenant_id,
+        app_id=app_id,
+        tool_id=tool_id,
+        conversation_id=conversation_id,
+        model_confidence=model_confidence,
+    ).enforcement
 
 
 def record_tool_outcome(
