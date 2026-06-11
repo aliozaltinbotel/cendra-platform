@@ -172,6 +172,13 @@ These questions are no longer implementation gates — per board direction (2026
 
 > **Current status (board direction, CEN-8 comment, 2026-06-11):** License compliance is owned and handled at board level under an existing agreement with/regarding LangGenius. Engineering and product work proceeds without per-item license sign-off; the prior Forge sign-off path ([CEN-9](/CEN/issues/CEN-9)) is superseded for gating purposes. Standing rule unaffected by this: Cendra engineering never modifies Dify branding elements (logo, attribution notices, Dify-branded nav text) — any such change is executed under the board's arrangement, not in our lanes.
 
+### Forge Note (CEN-9, 2026-06-11)
+
+Forge stands the license gate **down** per the board direction above — [CEN-9](/CEN/issues/CEN-9) is retired as a blocker, not converted into a Forge approval gate. Two engineering facts are recorded here so the scope labels remain trustworthy as a record (this is taxonomy/architecture, not a license guardrail):
+
+- **`(a)`/`(b)` split verified against the actual LICENSE.** The LangGenius additional conditions protect exactly two things: §1b — the **LOGO and copyright** in the Dify frontend (`web/` per the license's own Frontend Definition); and §1a — operating a **multi-tenant** environment (one tenant = one workspace). Checked every `(a) Our surface` / `(c) Neutral` row against §1b: **none of them remove, modify, hide, or restyle the Dify logo or copyright** — they are Cendra-owned surfaces (`web/**/brain/`, console copy, RBAC routing, CSS on our own elements, a curated wrapper). The only rows that touch Dify branding are the three correctly labeled `(b)`. The taxonomy is accurate; no `(a)` row is secretly `(b)`.
+- **The one non-branding exposure is the multi-tenant row, not chrome.** "Serve multiple PM tenants from one deployment" is **not** a logo/copyright question — it is §1a (one workspace = one tenant). It is therefore the item the board's LangGenius arrangement most needs to actually cover; flagged here factually, left to the board per their direction, and not re-gated by engineering.
+
 ---
 
 ## 4. Moat-not-Clone Audit (Compass, CEN-8, 2026-06-11)
