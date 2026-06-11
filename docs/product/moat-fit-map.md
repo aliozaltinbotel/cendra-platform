@@ -6,7 +6,7 @@
 > **Last updated:** 2026-06-11
 > **Purpose:** For every Brain Engine moat mechanism and every Dify table-stakes capability, one row: mechanism → Dify attachment point → what it governs → differentiation verdict → hospitality expression. This is the canonical defensibility reference for G2 PRDs and design-partner demo narrative.
 >
-> **Board confirmation pending** on the differentiation verdict section before it is treated as the product north star.
+> **Board confirmed (2026-06-11):** the differentiation verdict is the product north star — the binding input to G2 PRDs and the design-partner demo narrative (CEN-4 confirmation interaction `52576e43`).
 
 ---
 
@@ -156,4 +156,4 @@ Ruling on the three flags Compass raised in the CEN-8 productization pass ([Hosp
 
 > **Permitted no-claim surfaces** (not clone risks — differentiation claims are barred outright, so there is nothing to protect): **"Urgent — Safety Issue" critical escalation** (CEN-10 ruling above).
 
-> **Board confirmation requested:** Before this map is used as the input to G2 PRDs or design-partner demo narrative, the board should confirm the differentiation verdicts above, particularly the "clone risk" designations and the five defensible surfaces listed in the synthesis.
+> **Board confirmed (2026-06-11):** the differentiation verdicts above — including the clone-risk designations and the five defensible surfaces — are confirmed as the product north star (CEN-4 confirmation interaction `52576e43`). This map is the binding input to G2 PRDs and the design-partner demo narrative; the Moat Maturity Ruling and demo-narrative rule in the synthesis are in force.
