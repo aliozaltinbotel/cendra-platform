@@ -8,7 +8,7 @@ canonical record bytes, so existing digests and chain semantics are
 unchanged.  Additive only.
 
 Revision ID: c3ndra0b8001
-Revises: c3ndra0b7001
+Revises: c3ndra0b7003
 Create Date: 2026-06-11
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "c3ndra0b8001"
-down_revision = "c3ndra0b7001"
+down_revision = "c3ndra0b7003"
 branch_labels = None
 depends_on = None
 
