@@ -4,7 +4,7 @@ Adds the CEN-31 observe-only per-tenant posture state plus the
 append-only audit trail used for evidence packs.
 
 Revision ID: c3ndra0b7003
-Revises: c3ndra0b6001
+Revises: c3ndra0b7002
 Create Date: 2026-06-11
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "c3ndra0b7003"
-down_revision = "c3ndra0b6001"
+down_revision = "c3ndra0b7002"
 branch_labels = None
 depends_on = None
 
