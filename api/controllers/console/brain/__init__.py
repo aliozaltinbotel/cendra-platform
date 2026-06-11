@@ -13,11 +13,16 @@ from controllers.console import console_ns
 from controllers.console.wraps import account_initialization_required, setup_required
 from core.brain.policy.errors import OwnerPolicyCompileError
 from libs.login import login_required
+from services.brain_gate_wiring_service import BrainGateWiringService
 from services.brain_governance_service import BrainGovernanceService
 
 
 def _service() -> BrainGovernanceService:
     return BrainGovernanceService(current_user.current_tenant_id)
+
+
+def _gate_wiring_service() -> BrainGateWiringService:
+    return BrainGateWiringService(current_user.current_tenant_id)
 
 
 @console_ns.route("/brain/trust-meter/<string:property_id>")
@@ -64,3 +69,32 @@ class ConsoleBrainCasesApi(Resource):
                 offset=int(request.args.get("offset", 0)),
             )
         }
+
+
+@console_ns.route("/brain/gate-wiring/node-types")
+class ConsoleBrainGateWiringNodeTypesApi(Resource):
+    """Authoritative gate-wired node-type → touchpoint enumeration (CEN-41)."""
+
+    @setup_required
+    @login_required
+    @account_initialization_required
+    def get(self):
+        return {"node_types": _gate_wiring_service().node_type_enumeration()}
+
+
+@console_ns.route("/brain/gate-wiring/workflow/<string:workflow_id>")
+class ConsoleBrainGateWiringWorkflowApi(Resource):
+    """Per-workflow / per-node governed-status read for the builder surfaces.
+
+    Lets the console render the per-flow governed indicator and per-node
+    markers from this read alone — no canvas-shape heuristics (CEN-41).
+    """
+
+    @setup_required
+    @login_required
+    @account_initialization_required
+    def get(self, workflow_id: str):
+        report = _gate_wiring_service().inspect_workflow(workflow_id)
+        if report is None:
+            return {"message": "workflow not found"}, 404
+        return report

@@ -60,9 +60,11 @@ from core.brain.risk.gate import RiskGate
 __all__ = [
     "GATES_MODE_ENV",
     "GATES_TENANTS_ENV",
+    "GovernancePosture",
     "ShadowDispatch",
     "evaluate_dispatch_with_shadow",
     "evaluate_tool_dispatch",
+    "governance_posture",
     "record_tool_outcome",
     "reset_gateway_state",
 ]
@@ -100,6 +102,36 @@ def _tenant_enabled(tenant_id: str) -> bool:
         return True
     allowed = {t.strip() for t in raw.split(",") if t.strip()}
     return tenant_id in allowed
+
+
+class GovernancePosture(NamedTuple):
+    """A tenant's gate-chain posture, read for introspection surfaces.
+
+    ``mode`` is the process-wide ``BRAIN_GATES_MODE`` (``off`` / ``observe``
+    / ``enforce``).  ``tenant_enabled`` is whether this tenant falls inside
+    the ``BRAIN_GATES_TENANTS`` allowlist (an empty allowlist enables all).
+    ``active`` — the value surfaces actually care about — is ``True`` only
+    when the chain would run for this tenant (mode ≥ observe *and* the
+    tenant is allowed).  A gate-wired node type at a tenant whose posture is
+    inactive is *not* "governed" (CEN-41 acceptance, PRD §6 label-integrity).
+    """
+
+    mode: str
+    tenant_enabled: bool
+    active: bool
+
+
+def governance_posture(tenant_id: str) -> GovernancePosture:
+    """Resolve the gate-chain posture for ``tenant_id``.
+
+    Single authoritative reader of the rollout switches so introspection
+    surfaces report exactly what the T1/T3 dispatch hooks would observe —
+    rather than re-parsing the env and drifting from
+    :func:`evaluate_tool_dispatch`.
+    """
+    mode = _mode()
+    enabled = _tenant_enabled(tenant_id) if tenant_id else False
+    return GovernancePosture(mode=mode, tenant_enabled=enabled, active=mode != _MODE_OFF and enabled)
 
 
 class _MonitorComplianceGate:
